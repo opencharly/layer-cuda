@@ -12,7 +12,7 @@ cuda:
             compiles against one layout regardless of distro. Each artifact is a
             real file or library on disk, so its presence is directly verifiable.
         require:
-            - nvidia
+            - '@github.com/opencharly/layer-nvidia:v2026.235.2120'
             - '@github.com/opencharly/layer-ffmpeg:v2026.235.2057'
         env:
             # /usr is correct on Fedora (where CUDA RPMs land in /usr/bin, /usr/lib64,
