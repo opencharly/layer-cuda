@@ -1,7 +1,7 @@
 version: 2026.232.0520
 cuda:
     candy:
-        version: 2026.229.1218
+        version: 2026.243.0100
         description: |
             CUDA toolkit (nvcc, cudart, cuDNN, onnxruntime) stitched into the canonical /usr layout on Fedora and Arch
             Installs the CUDA compiler driver (nvcc), the CUDA runtime/dev
@@ -12,8 +12,8 @@ cuda:
             compiles against one layout regardless of distro. Each artifact is a
             real file or library on disk, so its presence is directly verifiable.
         require:
-            - '@github.com/opencharly/layer-nvidia:v2026.235.2120'
-            - '@github.com/opencharly/layer-ffmpeg:v2026.235.2057'
+            - '@github.com/opencharly/layer-nvidia:v2026.236.116'
+            - '@github.com/opencharly/layer-ffmpeg:v2026.239.1614'
         env:
             # /usr is correct on Fedora (where CUDA RPMs land in /usr/bin, /usr/lib64,
             # /usr/include). On Arch, extra/cuda installs to /opt/cuda — a
