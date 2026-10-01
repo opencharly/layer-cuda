@@ -10,8 +10,8 @@ cuda:
             compiles against one layout regardless of distro. Each artifact is a
             real file or library on disk, so its presence is directly verifiable.
         require:
-            - '@github.com/opencharly/layer-nvidia:v2026.236.116'
-            - '@github.com/opencharly/layer-ffmpeg:v2026.239.1614'
+            - '@github.com/opencharly/layer-nvidia:v2026.271.1817'
+            - '@github.com/opencharly/layer-ffmpeg:v2026.272.0056'
         env:
             # /usr is correct on Fedora (where CUDA RPMs land in /usr/bin, /usr/lib64,
             # /usr/include). On Arch, extra/cuda installs to /opt/cuda — a
