@@ -139,8 +139,22 @@ cuda:
                 # Headers — cudnn*.h live in /opt/cuda/targets/x86_64-linux/include
                 # on the cudnn package, while CUDA's own headers live in
                 # /opt/cuda/include. Symlink both into /usr/include.
-                for inc in /opt/cuda/include/*.h /opt/cuda/targets/x86_64-linux/include/*.h; do
-                  [ -e "$inc" ] && ln -sf "$inc" /usr/include/$(basename "$inc")
+                # Headers — link EVERY ENTRY of each toolkit include root, not a guessed subset.
+                # nvcc computes its default include root RELATIVE to its own executable, and
+                # /usr/bin/nvcc is a symlink, so all CUDA headers must be reachable under
+                # /usr/include. Enumerating by pattern is what broke this: a `*.h` glob linked the
+                # top-level headers but silently dropped (a) the SUBTREES crt/ and cccl/, which
+                # killed every build at CMake's enable_language(CUDA) with "crt/host_config.h: No
+                # such file or directory", and then (b) the `.hpp` half of the `_functions` family
+                # (`vector_functions.hpp` and friends), which killed the very next stage -- both
+                # reported on opencharly/layer-cuda#9. Linking every entry needs no extension list
+                # to keep in sync and cannot silently miss a file or a subtree again.
+                for root in /opt/cuda/include /opt/cuda/targets/x86_64-linux/include; do
+                  [ -d "$root" ] || continue
+                  for entry in "$root"/*; do
+                    [ -e "$entry" ] || continue
+                    ln -sfn "$entry" /usr/include/"$(basename "$entry")"
+                  done
                 done
                 # Libraries: libcudart, libcudnn, libcurand, etc.
                 mkdir -p /usr/lib64
@@ -159,8 +173,22 @@ cuda:
                 # Headers — cudnn*.h live in /opt/cuda/targets/x86_64-linux/include
                 # on the cudnn package, while CUDA's own headers live in
                 # /opt/cuda/include. Symlink both into /usr/include.
-                for inc in /opt/cuda/include/*.h /opt/cuda/targets/x86_64-linux/include/*.h; do
-                  [ -e "$inc" ] && ln -sf "$inc" /usr/include/$(basename "$inc")
+                # Headers — link EVERY ENTRY of each toolkit include root, not a guessed subset.
+                # nvcc computes its default include root RELATIVE to its own executable, and
+                # /usr/bin/nvcc is a symlink, so all CUDA headers must be reachable under
+                # /usr/include. Enumerating by pattern is what broke this: a `*.h` glob linked the
+                # top-level headers but silently dropped (a) the SUBTREES crt/ and cccl/, which
+                # killed every build at CMake's enable_language(CUDA) with "crt/host_config.h: No
+                # such file or directory", and then (b) the `.hpp` half of the `_functions` family
+                # (`vector_functions.hpp` and friends), which killed the very next stage -- both
+                # reported on opencharly/layer-cuda#9. Linking every entry needs no extension list
+                # to keep in sync and cannot silently miss a file or a subtree again.
+                for root in /opt/cuda/include /opt/cuda/targets/x86_64-linux/include; do
+                  [ -d "$root" ] || continue
+                  for entry in "$root"/*; do
+                    [ -e "$entry" ] || continue
+                    ln -sfn "$entry" /usr/include/"$(basename "$entry")"
+                  done
                 done
                 # Libraries: libcudart, libcudnn, libcurand, etc.
                 mkdir -p /usr/lib64
@@ -180,6 +208,25 @@ cuda:
               file:
                 file: /usr/include/cudnn.h
                 exists: true
+            - check: "a CUDA translation unit PREPROCESSES against the stitched /usr layout (Arch: the header subtrees are linked, not only the top-level files)"
+              id: cuda-arch-header-root
+              # Scoped IN THE COMMAND deliberately: the check runner does not honour runner-level
+              # exclude-distro fields, and Fedora's RPMs land in /usr directly so its layout differs.
+              #
+              # This is the probe the plan was missing. `nvcc --version` proves nvcc RUNS and the
+              # cuDNN probe proves one top-level header arrived -- but neither can FAIL on a layout
+              # that cannot compile, which is how `crt/` stayed unlinked while every probe passed:
+              # nvcc computes its include root relative to its own (symlinked) executable, so
+              # cuda_runtime.h's `#include "crt/host_config.h"` resolved under /usr/include and was
+              # not there. Reproduced end to end on real Arch hardware (opencharly/layer-cuda#9).
+              command: |
+                [ -f /etc/arch-release ] || exit 0
+                test -f /usr/include/crt/host_config.h || exit 1
+                printf 'int main(void){return 0;}\n' > /tmp/chkcuda.cu
+                nvcc -E -x cu /tmp/chkcuda.cu > /dev/null
+                rc=$?
+                rm -f /tmp/chkcuda.cu
+                exit $rc
             - check: the CUDA runtime library is linkable from the canonical /usr/lib64 path
               exit_status: 0
               command: ls /usr/lib64/libcudart.so*
@@ -244,8 +291,19 @@ cuda-skill:
             
             The candy is multi-distro. The `distro.arch` section installs `cuda`, `cudnn`,
             and `python-onnxruntime-cpu` from the Arch repos. Arch installs CUDA under
-            `/opt/cuda`, while `CUDA_HOME` is `/usr`, so the Arch path symlinks
-            `/opt/cuda/*` into `/usr/*` to stitch the Arch layout into the Fedora layout.
+            `/opt/cuda` — its toolkit headers under `/opt/cuda/targets/x86_64-linux/include/` —
+            while `CUDA_HOME` is `/usr`, so the Arch path links **every entry of those trees into
+            `/usr`** — files of any extension and subtrees alike, enumerated rather than
+            pattern-matched. `nvcc` computes its include root *relative to its own executable*, and
+            `/usr/bin/nvcc` is a symlink, so anything not reachable under `/usr/include` cannot be
+            found: `cuda_runtime.h`'s own `#include` fails and every CUDA build dies at CMake's
+            `enable_language(CUDA)` with "No such file or directory". Matching on patterns produced
+            both of those failures, on both Arch arms, while every probe in this plan still passed
+            (opencharly/layer-cuda#9): first a `*.h` glob that linked the top-level headers but not
+            the `crt/` and `cccl/` subtrees, then the same glob missing the `.hpp` half of the
+            `_functions` family once the subtrees were linked. The check `cuda-arch-header-root`
+            preprocesses a real CUDA translation unit to prove the whole header root resolves.
+
             With that stitch in place, the same `nvcc`, header, and library paths resolve
             identically on Fedora and on Arch/CachyOS.
             
