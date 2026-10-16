@@ -1,0 +1,13 @@
+# charly local state — never commit
+#
+# `.build/` is the build cache: generated candy checkouts (`_candy/`) of THIS
+# repo's dependencies, recreated by every `charly box validate`/`generate`/`build`.
+# `.containerignore` and `.dockerignore` are generated context-ignore files
+# (gitignored org-wide by the shared ignore rules).
+#
+# Without this file a `git add -A` silently lands all of it in a PR — which is
+# exactly what happened in opencharly/layer-cuda#10, where 18 of 19 changed files
+# were this cache rather than the change.
+.build/
+.containerignore
+.dockerignore
