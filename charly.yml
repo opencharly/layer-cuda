@@ -48,7 +48,17 @@ cuda:
                     - cuda-nvrtc-devel
                     - cuda-cupti-devel
                     - libcurand-devel
-                    - cuda-cccl-devel
+                    # The CCCL (CUDA C++ Core Libraries) headers are named `cccl-devel` in the
+                    # repo these packages actually resolve from. This list previously said
+                    # `cuda-cccl-devel`, which no enabled repo provides, so every GPU image failed
+                    # its dnf transaction. Note the repo split, measured with
+                    # `dnf repoquery --whatprovides '*/cuda/std/version'`:
+                    #   fedora-multimedia -> cccl-devel-1:13.3.4.2.1-1.fc43
+                    #   NVIDIA cuda-fedora43 -> cuda-cccl-13-2-0 (not used here; its gpgcheck
+                    #   fails, and nothing else in the list resolves from it either)
+                    # `cuda-nvcc` and `cuda-cudart-devel` carry NO cuda/std files, so this line is
+                    # load-bearing and must not simply be dropped (opencharly/layer-cuda#7).
+                    - cccl-devel
                     - cuda-cudnn
                     - libcufile-devel
                 exclude:
@@ -224,7 +234,7 @@ cuda-skill:
             
             ## Packages
             
-            RPM: `cuda-nvcc`, `cuda-cudart-devel`, `cuda-cudart-static`, `cuda-nvrtc-devel`, `cuda-cupti-devel`, `cuda-cccl-devel`, `cuda-cudnn`, `libcurand-devel`, `libcufile-devel`, `onnxruntime`, `libaio-devel`, `cpio`
+            RPM: `cuda-nvcc`, `cuda-cudart-devel`, `cuda-cudart-static`, `cuda-nvrtc-devel`, `cuda-cupti-devel`, `cccl-devel`, `cuda-cudnn`, `libcurand-devel`, `libcufile-devel`, `onnxruntime`, `libaio-devel`, `cpio`
             
             PAC: `cuda`, `cudnn`, `python-onnxruntime-cpu`
             
