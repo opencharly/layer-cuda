@@ -149,6 +149,16 @@ cuda:
                 # (`vector_functions.hpp` and friends), which killed the very next stage -- both
                 # reported on opencharly/layer-cuda#9. Linking every entry needs no extension list
                 # to keep in sync and cannot silently miss a file or a subtree again.
+                # nvcc resolves its OWN helpers relative to its own executable path. Through the
+                # /usr/bin/nvcc symlink that means /usr/<sibling>/ — so the toolkit's sibling TREES
+                # must exist at /usr too, not only its files. Without /usr/nvvm, nvcc cannot find its
+                # backend compiler at all: "$CICC_PATH/cicc: No such file or directory"
+                # (/usr/sbin/../nvvm/bin/cicc), and every CUDA compile dies while PREPROCESSING
+                # still succeeds — which is exactly how the check added in #10 stayed green through
+                # it. Both halves of that lesson are fixed here.
+                for tree in nvvm; do
+                  [ -d "/opt/cuda/$tree" ] && [ ! -e "/usr/$tree" ] && ln -sfn "/opt/cuda/$tree" "/usr/$tree"
+                done
                 for root in /opt/cuda/include /opt/cuda/targets/x86_64-linux/include; do
                   [ -d "$root" ] || continue
                   for entry in "$root"/*; do
@@ -183,6 +193,16 @@ cuda:
                 # (`vector_functions.hpp` and friends), which killed the very next stage -- both
                 # reported on opencharly/layer-cuda#9. Linking every entry needs no extension list
                 # to keep in sync and cannot silently miss a file or a subtree again.
+                # nvcc resolves its OWN helpers relative to its own executable path. Through the
+                # /usr/bin/nvcc symlink that means /usr/<sibling>/ — so the toolkit's sibling TREES
+                # must exist at /usr too, not only its files. Without /usr/nvvm, nvcc cannot find its
+                # backend compiler at all: "$CICC_PATH/cicc: No such file or directory"
+                # (/usr/sbin/../nvvm/bin/cicc), and every CUDA compile dies while PREPROCESSING
+                # still succeeds — which is exactly how the check added in #10 stayed green through
+                # it. Both halves of that lesson are fixed here.
+                for tree in nvvm; do
+                  [ -d "/opt/cuda/$tree" ] && [ ! -e "/usr/$tree" ] && ln -sfn "/opt/cuda/$tree" "/usr/$tree"
+                done
                 for root in /opt/cuda/include /opt/cuda/targets/x86_64-linux/include; do
                   [ -d "$root" ] || continue
                   for entry in "$root"/*; do
@@ -208,7 +228,7 @@ cuda:
               file:
                 file: /usr/include/cudnn.h
                 exists: true
-            - check: "a CUDA translation unit PREPROCESSES against the stitched /usr layout (Arch: the header subtrees are linked, not only the top-level files)"
+            - check: "a CUDA translation unit COMPILES against the stitched /usr layout (Arch: the header subtrees are linked, not only the top-level files)"
               id: cuda-arch-header-root
               # Scoped IN THE COMMAND deliberately: the check runner does not honour runner-level
               # exclude-distro fields, and Fedora's RPMs land in /usr directly so its layout differs.
@@ -223,7 +243,7 @@ cuda:
                 [ -f /etc/arch-release ] || exit 0
                 test -f /usr/include/crt/host_config.h || exit 1
                 printf 'int main(void){return 0;}\n' > /tmp/chkcuda.cu
-                nvcc -E -x cu /tmp/chkcuda.cu > /dev/null
+                nvcc -c -x cu -o /tmp/chkcuda.o /tmp/chkcuda.cu
                 rc=$?
                 rm -f /tmp/chkcuda.cu
                 exit $rc
