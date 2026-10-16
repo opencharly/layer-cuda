@@ -168,8 +168,19 @@ cuda:
                 done
                 # Libraries: libcudart, libcudnn, libcurand, etc.
                 mkdir -p /usr/lib64
-                for so in /opt/cuda/targets/x86_64-linux/lib/*.so* /opt/cuda/lib64/*.so*; do
-                  [ -e "$so" ] && ln -sf "$so" /usr/lib64/$(basename "$so")
+                # Enumerate EVERY entry, not a `*.so*` glob. nvcc links the STATIC archives by
+                # default (libcudart_static.a, libcudadevrt.a, libculibos.a, ...), and a `.so*`
+                # pattern cannot match a `.a` — so the linker failed with "cannot find
+                # -lcudart_static: No such file or directory" although the package ships the file
+                # (opencharly/layer-cuda#12). Same defect shape as the `*.h` header glob that missed
+                # `.hpp`: pattern-matching a directory instead of enumerating it.
+                mkdir -p /usr/lib64
+                for libdir in /opt/cuda/targets/x86_64-linux/lib /opt/cuda/lib64; do
+                  [ -d "$libdir" ] || continue
+                  for entry in "$libdir"/*; do
+                    [ -e "$entry" ] || continue
+                    ln -sfn "$entry" /usr/lib64/"$(basename "$entry")"
+                  done
                 done
               run_as: root
               command: |
@@ -212,8 +223,19 @@ cuda:
                 done
                 # Libraries: libcudart, libcudnn, libcurand, etc.
                 mkdir -p /usr/lib64
-                for so in /opt/cuda/targets/x86_64-linux/lib/*.so* /opt/cuda/lib64/*.so*; do
-                  [ -e "$so" ] && ln -sf "$so" /usr/lib64/$(basename "$so")
+                # Enumerate EVERY entry, not a `*.so*` glob. nvcc links the STATIC archives by
+                # default (libcudart_static.a, libcudadevrt.a, libculibos.a, ...), and a `.so*`
+                # pattern cannot match a `.a` — so the linker failed with "cannot find
+                # -lcudart_static: No such file or directory" although the package ships the file
+                # (opencharly/layer-cuda#12). Same defect shape as the `*.h` header glob that missed
+                # `.hpp`: pattern-matching a directory instead of enumerating it.
+                mkdir -p /usr/lib64
+                for libdir in /opt/cuda/targets/x86_64-linux/lib /opt/cuda/lib64; do
+                  [ -d "$libdir" ] || continue
+                  for entry in "$libdir"/*; do
+                    [ -e "$entry" ] || continue
+                    ln -sfn "$entry" /usr/lib64/"$(basename "$entry")"
+                  done
                 done
             - check: the nvcc CUDA compiler driver is on the canonical /usr path
               file:
@@ -228,7 +250,7 @@ cuda:
               file:
                 file: /usr/include/cudnn.h
                 exists: true
-            - check: "a CUDA translation unit COMPILES against the stitched /usr layout (Arch: the header subtrees are linked, not only the top-level files)"
+            - check: "a CUDA translation unit COMPILES AND LINKS against the stitched /usr layout (Arch: the header subtrees are linked, not only the top-level files)"
               id: cuda-arch-header-root
               # Scoped IN THE COMMAND deliberately: the check runner does not honour runner-level
               # exclude-distro fields, and Fedora's RPMs land in /usr directly so its layout differs.
@@ -243,7 +265,7 @@ cuda:
                 [ -f /etc/arch-release ] || exit 0
                 test -f /usr/include/crt/host_config.h || exit 1
                 printf 'int main(void){return 0;}\n' > /tmp/chkcuda.cu
-                nvcc -c -x cu -o /tmp/chkcuda.o /tmp/chkcuda.cu
+                nvcc -x cu -o /tmp/chkcuda /tmp/chkcuda.cu
                 rc=$?
                 rm -f /tmp/chkcuda.cu
                 exit $rc
