@@ -10,6 +10,15 @@ cuda:
             compiles against one layout regardless of distro. Each artifact is a
             real file or library on disk, so its presence is directly verifiable.
         require:
+            # A RELEASE TAG, not a commit: a consumer that also names the tag would
+            # otherwise resolve this candy's dependency at two refs and refuse the
+            # project --
+            #   candy github.com/opencharly/layer-nvidia resolved to multiple git tags
+            #   with differing content within one scope (measured in distro-cachyos,
+            #   box=nvidia / box=versa, while this pin was the bare commit).
+            # v2026.320.1938 is the tag that carries the CDI driver-shadowing fix
+            # (opencharly/layer-nvidia#22); the pin has to move with it because the
+            # strip changes what a composed image may contain.
             - '@github.com/opencharly/layer-nvidia:v2026.320.1938'
             - '@github.com/opencharly/layer-ffmpeg:v2026.272.0056'
         env:
