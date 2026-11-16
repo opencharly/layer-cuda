@@ -275,7 +275,11 @@ cuda:
                 # path and only /proc/self/mountinfo can tell them apart (not readable on
                 # every venue; measured red on a CORRECT fedora image). Enforcement here
                 # cannot be fooled.
-                left=$(find /usr/lib /usr/lib64 -maxdepth 1 -type f -name 'libnvidia-opencl.so*' 2>/dev/null | wc -l)
+                # files AND symlinks: the SONAME link (libnvidia-opencl.so.1) is a symlink,
+                # and the failure class this guards against IS a symlink pointing at a
+                # versioned copy. The delete above has no -type restriction, so the two
+                # sets match.
+                left=$(find /usr/lib /usr/lib64 -maxdepth 1 \( -type f -o -type l \) -name 'libnvidia-opencl.so*' 2>/dev/null | wc -l)
                 echo "opencl driver library files still baked after the strip: $left"
                 test "$left" -eq 0 || exit 1
             - check: the nvcc CUDA compiler driver is on the canonical /usr path
