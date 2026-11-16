@@ -237,6 +237,47 @@ cuda:
                     ln -sfn "$entry" /usr/lib64/"$(basename "$entry")"
                   done
                 done
+            # ── The driver user-space this package PULLS IN must not be baked ────
+            # Arch's `cuda` package depends on `opencl-nvidia`, which ships the NVIDIA
+            # OpenCL driver library (/usr/lib/libnvidia-opencl.so.620.70.06 + its SONAME
+            # links). That library is HOST-COUPLED the same way nvidia-utils' driver
+            # user-space is: NVIDIA's CDI create-symlinks hook points each SONAME at the
+            # newest versioned copy present in the container, so an image copy newer than
+            # the host's kernel driver wins and NVML/OpenCL init fails against a module it
+            # does not match. Measured on a cachyos ollama image (host driver 615.78.08):
+            # this one file was the last baked driver library left after
+            # layer-nvidia's own strip, and it was reported by
+            # `nvidia-driver-libs-match-kernel-module` / the mount-info probe as
+            # `baked driver library: /usr/lib/libnvidia-opencl.so.620.70.06`.
+            #
+            # Each installer cleans up after itself, which is why this lives HERE and not
+            # only in the nvidia candy: nvidia-utils' files are installed before this
+            # stage, opencl-nvidia's are installed by it. The Vulkan/OpenCL ICD JSON stays
+            # (it names a SONAME, not a version, so the CDI-created link satisfies it).
+            - run: drop the driver user-space the cuda package pulls in via opencl-nvidia, so the CDI mount is its only provider
+              id: cuda-drop-opencl-driver-lib
+              run_as: root
+              command: |
+                set -eu
+                removed=0
+                for f in /usr/lib/libnvidia-opencl.so /usr/lib/libnvidia-opencl.so.1 \
+                         /usr/lib/libnvidia-opencl.so.[0-9]*; do
+                  if [ -e "$f" ] || [ -L "$f" ]; then
+                    rm -f "$f"
+                    removed=$((removed + 1))
+                  fi
+                done
+                echo "dropped $removed opencl-nvidia driver library file(s)"
+                # Same reason as the nvidia candy's strip: this RUN executes in the build
+                # container, where no CDI has injected anything, so a remaining match is
+                # unambiguously image content -- while a `check:` step may run in a
+                # GPU-attached container where the host's identical libs sit at the same
+                # path and only /proc/self/mountinfo can tell them apart (not readable on
+                # every venue; measured red on a CORRECT fedora image). Enforcement here
+                # cannot be fooled.
+                left=$(find /usr/lib /usr/lib64 -maxdepth 1 -type f -name 'libnvidia-opencl.so*' 2>/dev/null | wc -l)
+                echo "opencl driver library files still baked after the strip: $left"
+                test "$left" -eq 0 || exit 1
             - check: the nvcc CUDA compiler driver is on the canonical /usr path
               file:
                 file: /usr/bin/nvcc
