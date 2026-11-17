@@ -263,34 +263,75 @@ cuda:
             # only in the nvidia candy: nvidia-utils' files are installed before this
             # stage, opencl-nvidia's are installed by it. The Vulkan/OpenCL ICD JSON stays
             # (it names a SONAME, not a version, so the CDI-created link satisfies it).
-            - run: drop the driver user-space the cuda package pulls in via opencl-nvidia, so the CDI mount is its only provider
-              id: cuda-drop-opencl-driver-lib
+            # The cuda package DEPENDS on nvidia-utils on the pac path, so installing it
+            # re-extracts the WHOLE host-coupled driver user-space that the nvidia candy's
+            # `nvidia-drop-driver-userspace` step had already removed -- not just
+            # opencl-nvidia's share. Measured on CachyOS: host kernel module 615.78.08 vs a
+            # baked userspace 620.70.06 (the repo had moved ahead of the installed driver),
+            # after which the NVIDIA CDI `create-symlinks` hook pointed `libnvidia-ml.so.1`
+            # at the baked NEWER file, `nvidia-smi` exited 18 ("Driver/library version
+            # mismatch") and ollama's free-VRAM estimate yielded nothing usable, so inference
+            # silently offloaded 0/29 layers and ran on CPU. opencharly/layer-cuda#21.
+            #
+            # The installer that pulls the files in cleans up after itself, which is why this
+            # lives HERE and not only in the nvidia candy: this stage is what reinstalls them.
+            - run: drop the driver user-space the cuda package reinstalls through nvidia-utils, so the CDI mount is its only provider
+              id: cuda-drop-driver-userspace
               run_as: root
               command: |
                 set -eu
                 removed=0
-                for f in /usr/lib/libnvidia-opencl.so /usr/lib/libnvidia-opencl.so.1 \
-                         /usr/lib/libnvidia-opencl.so.[0-9]*; do
-                  if [ -e "$f" ] || [ -L "$f" ]; then
-                    rm -f "$f"
-                    removed=$((removed + 1))
-                  fi
+                for d in /usr/lib /usr/lib64; do
+                  if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
+                  out=$(find "$d" -maxdepth 1 \( -name 'libnvidia-*.so*' -o -name 'libcuda*.so*' \
+                        -o -name 'libnvcuvid.so*' -o -name 'libnvoptix.so*' -o -name 'libGLX_nvidia.so*' \
+                        -o -name 'libEGL_nvidia.so*' -o -name 'libGLESv1_CM_nvidia.so*' \
+                        -o -name 'libGLESv2_nvidia.so*' \) -print -delete 2>/dev/null || true)
+                  n=$(printf '%s\n' "$out" | grep -c . || true)
+                  removed=$((removed + n))
                 done
-                echo "dropped $removed opencl-nvidia driver library file(s)"
-                # Same reason as the nvidia candy's strip: this RUN executes in the build
-                # container, where no CDI has injected anything, so a remaining match is
-                # unambiguously image content -- while a `check:` step may run in a
-                # GPU-attached container where the host's identical libs sit at the same
-                # path and only /proc/self/mountinfo can tell them apart (not readable on
-                # every venue; measured red on a CORRECT fedora image). Enforcement here
-                # cannot be fooled.
-                # files AND symlinks: the SONAME link (libnvidia-opencl.so.1) is a symlink,
-                # and the failure class this guards against IS a symlink pointing at a
-                # versioned copy. The delete above has no -type restriction, so the two
-                # sets match.
-                left=$(find /usr/lib /usr/lib64 -maxdepth 1 \( -type f -o -type l \) -name 'libnvidia-opencl.so*' 2>/dev/null | wc -l)
-                echo "opencl driver library files still baked after the strip: $left"
+                rm -rf /usr/lib/nvidia /usr/lib/vdpau /usr/lib/xorg/modules/drivers/nvidia_drv.so
+                echo "dropped $removed driver library file(s) plus the xorg/vdpau driver trees"
+                # The BINARIES are host-coupled in exactly the same way, and the CDI injection
+                # mounts them too (measured in a live pod: nvidia-smi, nvidia-cuda-mps-control,
+                # nvidia-cuda-mps-server, nvidia-debugdump, nvidia-persistenced, nvidia-xconfig
+                # are all bind-mounted from the host). A baked copy is a second, wrong-version
+                # one, and for nvidia-smi it is actively misleading: it reports on the image's
+                # own libraries instead of the ones injected with the running driver.
+                #
+                # This deletes the WHOLE `nvidia*` set rather than a hand-listed subset. A
+                # subset is how this step first shipped and its own assertion caught three
+                # leftovers it had missed (nvidia-container-toolkit and its two
+                # nvidia-container-runtime.<variant> wrappers) -- because the package also
+                # ships nvidia-ngx-updater, nvidia-pcc, nvidia-powerd and nvidia-sleep.sh, and
+                # a list that has to be right about every one of them will be wrong again.
+                # None of them belong in an image: the NVIDIA CONTAINER TOOLKIT is HOST
+                # tooling -- it generates the CDI spec and lives on the operator's machine --
+                # so an image copy is a second, drifting one that nothing runs.
+                binned=0
+                for d in /usr/bin /usr/local/bin /usr/sbin; do
+                  if [ ! -d "$d" ]; then continue; fi
+                  out=$(find "$d" -maxdepth 1 \( -type f -o -type l \) -name 'nvidia*' \
+                        -print -delete 2>/dev/null || true)
+                  n=$(printf '%s\n' "$out" | grep -c . || true)
+                  binned=$((binned + n))
+                done
+                echo "dropped $binned host-coupled nvidia binary/binaries"
+                left=$(find /usr/lib /usr/lib64 -maxdepth 1 \( -type f -o -type l \) \
+                    \( -name 'libnvidia-*.so*' -o -name 'libcuda*.so*' -o -name 'libnvcuvid.so*' \
+                    -o -name 'libnvoptix.so*' -o -name 'libGLX_nvidia.so*' \
+                    -o -name 'libEGL_nvidia.so*' -o -name 'libGLESv1_CM_nvidia.so*' \
+                    -o -name 'libGLESv2_nvidia.so*' \) 2>/dev/null | wc -l)
+                bleft=0
+                for d in /usr/bin /usr/local/bin /usr/sbin; do
+                  if [ ! -d "$d" ]; then continue; fi
+                  n=$(find "$d" -maxdepth 1 \( -type f -o -type l \) -name 'nvidia*' 2>/dev/null | wc -l)
+                  bleft=$((bleft + n))
+                done
+                echo "driver library files still baked after the strip: $left"
+                echo "host-coupled nvidia binaries still baked after the strip: $bleft"
                 test "$left" -eq 0 || exit 1
+                test "$bleft" -eq 0 || exit 1
             - check: the nvcc CUDA compiler driver is on the canonical /usr path
               file:
                 file: /usr/bin/nvcc
