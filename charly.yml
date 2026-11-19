@@ -10,16 +10,30 @@ cuda:
             compiles against one layout regardless of distro. Each artifact is a
             real file or library on disk, so its presence is directly verifiable.
         require:
-            # A RELEASE TAG, not a commit: a consumer that also names the tag would
-            # otherwise resolve this candy's dependency at two refs and refuse the
-            # project --
-            #   candy github.com/opencharly/layer-nvidia resolved to multiple git tags
-            #   with differing content within one scope (measured in distro-cachyos,
-            #   box=nvidia / box=versa, while this pin was the bare commit).
-            # v2026.320.1938 is the tag that carries the CDI driver-shadowing fix
-            # (opencharly/layer-nvidia#22); the pin has to move with it because the
-            # strip changes what a composed image may contain.
-            - '@github.com/opencharly/layer-nvidia:v2026.320.1938'
+            # NO `layer-nvidia` HERE, DELIBERATELY. This layer is the CUDA TOOLKIT; layer-nvidia
+            # is the DRIVER, and the two are different substrates' contracts, so a `require:`
+            # between them is a category error rather than an ordering convenience:
+            #
+            #   POD  the kernel module is host-global. The runtime injects the driver user-space
+            #        per container through /etc/cdi/nvidia.yaml, so the image must bake NONE
+            #        (layer-cdi's `cdi-no-baked-driver-binaries` fails the build when it does).
+            #   VM   the guest owns its kernel and must carry the driver itself.
+            #
+            # A `require:` is TARGET-BLIND: it pushed the driver into EVERY pod that composes
+            # this toolkit, which this layer's own `cuda-drop-driver-userspace` step then
+            # stripped again -- leaving layer-nvidia's baked `check:` assertions demanding
+            # /usr/bin/nvidia-ctk on an image whose composition deletes it, so no pod bed that
+            # composes the toolkit could ever go green (measured:
+            #   FAIL check the nvidia-ctk CLI binary lands on /usr/bin [layer-nvidia:4] exists=false
+            #   FAIL check nvidia-ctk runs and reports a version        [layer-nvidia:5] exit=127
+            # on opencharly/distro-cachyos `check-comfyui-pod`). opencharly/layer-nvidia#25 carries
+            # the diagnosis; opencharly/spec#395 records why the plan-scoping mechanisms that
+            # would have made the assertion venue-aware were rejected -- `context:` is
+            # build|deploy|runtime and pod-vs-VM is not even its axis.
+            #
+            # The dependency therefore lives where the substrate is known: a VM / NVIDIA box
+            # composes `layer-nvidia` ITSELF, at the box level (see opencharly/vm-nvidia). This
+            # layer declares only what the toolkit needs to install: ffmpeg's codec libraries.
             - '@github.com/opencharly/layer-ffmpeg:v2026.272.0056'
         env:
             # /usr is correct on Fedora (where CUDA RPMs land in /usr/bin, /usr/lib64,
@@ -400,9 +414,12 @@ cuda:
                 # the canonical POD strip: layer-cdi deliberately keeps its own copy out
                 # (`cdi-no-baked-driver-binaries` only ASSERTS), which is why leaving the
                 # binary in place is not an option here -- a pod image that carries
-                # nvidia-ctk fails that assertion. Whether layer-nvidia may still ASSERT
-                # /usr/bin/nvidia-ctk on an image that composes this layer is a plan-scoping
-                # question for that repo (opencharly/layer-nvidia#25).
+                # nvidia-ctk fails that assertion. The driver layer is therefore not a
+                # dependency of this one at all: which substrate supplies the driver is the
+                # BOX's decision, and a VM / NVIDIA box composes it itself (opencharly/vm-nvidia).
+                # The diagnosis of the alternative -- a venue-aware plan scope that would let a
+                # baked check declare itself inapplicable to a composition that strips its
+                # subject -- is in this repo's `require:` comment above.
                 binned=0
                 for d in $bins; do
                   if [ ! -d "$d" ]; then continue; fi
@@ -491,6 +508,8 @@ cuda-skill:
         family: distros
         owner: cuda
         description: |-
-            CUDA toolkit, cuDNN, ONNX Runtime, and NVIDIA GPU development libraries from negativo17 repos.
-            Depends on the nvidia candy for runtime support. Use when working with GPU computing, CUDA,
-            cuDNN, machine learning infrastructure, or NVIDIA development tools.
+            CUDA toolkit, cuDNN, ONNX Runtime, and NVIDIA GPU development libraries from the NVIDIA
+            CUDA repo plus negativo17 on Fedora, and from the Arch repos on Arch/CachyOS.
+            Carries NO driver dependency: a pod takes its driver from the host through the CDI spec,
+            and a VM box composes the driver layer itself, at the box level. Use when working with
+            GPU computing, CUDA, cuDNN, machine learning infrastructure, or NVIDIA development tools.
