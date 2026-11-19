@@ -275,23 +275,107 @@ cuda:
             #
             # The installer that pulls the files in cleans up after itself, which is why this
             # lives HERE and not only in the nvidia candy: this stage is what reinstalls them.
+            # layer-cuda#23: the pattern set was a PREFIX glob, `libcuda*.so*`, and that
+            # prefix family is not the driver's -- it also contains `libcudart*` and
+            # `libcudadevrt*`, i.e. the CUDA RUNTIME this layer exists to install. Measured
+            # on a built image (ghcr.io/opencharly/nvidia-cdi-layer-cuda, check-comfyui-pod
+            # 2026.323.0032), after this step had run:
+            #   /opt/cuda/lib64/libcudart.so, .so.13, .so.13.5.37   the stitch SOURCE, intact
+            #   /usr/lib64/libcudart_static.a                       the only cudart file left
+            #   /usr/lib64/libcudart.so*                            gone -- `ls` exits 2
+            # so the layer's own `ls /usr/lib64/libcudart.so*` check could never pass. The
+            # set is anchored to the DRIVER names now -- `libcuda.so*`, not `libcuda*` --
+            # plus `libcudadebugger.so*`, which IS driver user-space but does not carry the
+            # `libcuda.so` stem (it is in the CDI spec's injected set) -- and the step now asserts
+            # what it KEEPS, not only what it deletes: every CUDA runtime/compute library that
+            # was present before the strip must still be present after it, or the build fails
+            # naming the file it killed.
             - run: drop the driver user-space the cuda package reinstalls through nvidia-utils, so the CDI mount is its only provider
               id: cuda-drop-driver-userspace
               run_as: root
               command: |
                 set -eu
-                removed=0
-                for d in /usr/lib /usr/lib64; do
+                # ── THE PATTERN SET IS THE DRIVER USER-SPACE, AND NOTHING ELSE ──────────
+                # The three families that share a directory in this image (measured, see the
+                # comment block above):
+                #   DRIVER   libcuda.so{,.1,.<ver>}  libcudadebugger.so{,.1,.<ver>}  libnvidia-*.so*  ...
+                #   RUNTIME  libcudart.so{,.13,.13.5.37}  libcudart_static.a  libcudadevrt.a
+                #   COMPUTE  libcublas*, libcudnn*, libnvrtc*, libcurand*, libcufft*, ...
+                # The strip may only ever delete the FIRST family. A PREFIX glob cannot say
+                # that: `libcuda*` matches every member of the "libcuda" prefix family --
+                # libcuda.so*, libcudart*, libcudadebugger*, libcudadevrt* -- so it deleted
+                # the runtime this very layer installs and stitched, and the layer's own
+                # `ls /usr/lib64/libcudart.so*` check then exited 2 (layer-cuda#23).
+                # The `.` anchors it: `libcuda.so*` is the driver and only the driver.
+                #
+                # `libcudadebugger.so*` is listed EXPLICITLY because it is also driver
+                # user-space -- the NVIDIA CDI spec injects /usr/lib/libcudadebugger.so.<ver>
+                # (measured: /etc/cdi/nvidia.yaml, `nvidia-ctk cdi generate`), so a baked copy
+                # is host-coupled in exactly the way this step exists to prevent -- but it
+                # does not carry the `libcuda.so` stem, so anchoring alone would leave it
+                # behind. `libnvidia-*` covers nvidia-ml, eglcore, glcore, encode, ptxjitcompiler
+                # and the rest of the injected set; the tree and xorg removals below cover the
+                # three surfaces that are not top-level libraries.
+                #
+                # ONE definition, used by the delete, by the residue re-check AND by nothing else: three
+                # copies of a predicate is how the over-broad glob got in and stayed in.
+                #
+                # `set -f` is load-bearing. $drv is expanded UNQUOTED -- that is how the -o
+                # chain is spliced into the find(1) expression -- and without it the shell
+                # would pathname-expand `libcuda.so*` against the CURRENT DIRECTORY before
+                # find ever saw it.
+                set -f
+                drv="-name libnvidia-*.so* -o -name libcuda.so* -o -name libcudadebugger.so* \
+                -o -name libnvcuvid.so* -o -name libnvoptix.so* -o -name libGLX_nvidia.so* \
+                -o -name libEGL_nvidia.so* -o -name libGLESv1_CM_nvidia.so* \
+                -o -name libGLESv2_nvidia.so*"
+                # Overridable so the step can be EXECUTED against a fixture -- that is how its
+                # discriminating power is proven without a GPU and without an image build
+                # (same device layer-cdi's build assertion uses).
+                libs=${CUDA_STRIP_LIB_DIRS:-/usr/lib /usr/lib64}
+                bins=${CUDA_STRIP_BIN_DIRS:-/usr/bin /usr/local/bin /usr/sbin}
+
+                # THE BASELINE. Snapshot every shared library present BEFORE the strip. The survival
+                # assertion below judges the strip against it, and it is taken BEFORE the
+                # deletion on purpose: a post-hoc search of the directory would find the file
+                # already gone and could never judge it.
+                before=$(mktemp)
+                for d in $libs; do
                   if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
-                  out=$(find "$d" -maxdepth 1 \( -name 'libnvidia-*.so*' -o -name 'libcuda*.so*' \
-                        -o -name 'libnvcuvid.so*' -o -name 'libnvoptix.so*' -o -name 'libGLX_nvidia.so*' \
-                        -o -name 'libEGL_nvidia.so*' -o -name 'libGLESv1_CM_nvidia.so*' \
-                        -o -name 'libGLESv2_nvidia.so*' \) -print -delete 2>/dev/null || true)
+                  find "$d" -maxdepth 1 \( -type f -o -type l \) -name '*.so*' 2>/dev/null || true
+                done | sort > "$before"
+
+                removed=0
+                for d in $libs; do
+                  if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
+                  out=$(find "$d" -maxdepth 1 \( $drv \) -print -delete 2>/dev/null || true)
                   n=$(printf '%s\n' "$out" | grep -c . || true)
                   removed=$((removed + n))
                 done
                 rm -rf /usr/lib/nvidia /usr/lib/vdpau /usr/lib/xorg/modules/drivers/nvidia_drv.so
                 echo "dropped $removed driver library file(s) plus the xorg/vdpau driver trees"
+
+                # THE SURVIVAL ASSERTION -- the control this step was missing. It proved what
+                # it DELETED (the residue count below) and never what it must KEEP, so an
+                # over-broad pattern could delete the CUDA runtime this layer just stitched
+                # and every build-time control still passed; the check that notices
+                # (`ls /usr/lib64/libcudart.so*`) runs a stage later, in another repo's plan
+                # (layer-cuda#23). The judge is the set of libraries THIS layer installs --
+                # not the driver pattern set, which would make the test a tautology: a library
+                # from that set that existed before the strip and is gone after it means the
+                # pattern set is over-broad, and it is named and failed HERE.
+                killed=0
+                while IFS= read -r p; do
+                  if [ -e "$p" ] || [ -L "$p" ]; then continue; fi
+                  case "$(basename "$p")" in
+                    libcudart*.so*|libnvrtc*.so*|libcublas*.so*|libcudnn*.so*|libnvJitLink*.so*|libcurand*.so*|libcufft*.so*|libcusparse*.so*|libcusolver*.so*|libnccl*.so*)
+                      echo "STRIP DELETED A CUDA RUNTIME/COMPUTE LIBRARY: $p"
+                      killed=$((killed + 1)) ;;
+                  esac
+                done < "$before"
+                rm -f "$before"
+                echo "CUDA runtime/compute libraries the strip deleted: $killed (must be 0)"
+                test "$killed" -eq 0 || exit 1
                 # The BINARIES are host-coupled in exactly the same way, and the CDI injection
                 # mounts them too (measured in a live pod: nvidia-smi, nvidia-cuda-mps-control,
                 # nvidia-cuda-mps-server, nvidia-debugdump, nvidia-persistenced, nvidia-xconfig
@@ -307,9 +391,15 @@ cuda:
                 # a list that has to be right about every one of them will be wrong again.
                 # None of them belong in an image: the NVIDIA CONTAINER TOOLKIT is HOST
                 # tooling -- it generates the CDI spec and lives on the operator's machine --
-                # so an image copy is a second, drifting one that nothing runs.
+                # so an image copy is a second, drifting one that nothing runs. This is also
+                # the canonical POD strip: layer-cdi deliberately keeps its own copy out
+                # (`cdi-no-baked-driver-binaries` only ASSERTS), which is why leaving the
+                # binary in place is not an option here -- a pod image that carries
+                # nvidia-ctk fails that assertion. Whether layer-nvidia may still ASSERT
+                # /usr/bin/nvidia-ctk on an image that composes this layer is a plan-scoping
+                # question for that repo (opencharly/layer-nvidia#25).
                 binned=0
-                for d in /usr/bin /usr/local/bin /usr/sbin; do
+                for d in $bins; do
                   if [ ! -d "$d" ]; then continue; fi
                   out=$(find "$d" -maxdepth 1 \( -type f -o -type l \) -name 'nvidia*' \
                         -print -delete 2>/dev/null || true)
@@ -317,13 +407,14 @@ cuda:
                   binned=$((binned + n))
                 done
                 echo "dropped $binned host-coupled nvidia binary/binaries"
-                left=$(find /usr/lib /usr/lib64 -maxdepth 1 \( -type f -o -type l \) \
-                    \( -name 'libnvidia-*.so*' -o -name 'libcuda*.so*' -o -name 'libnvcuvid.so*' \
-                    -o -name 'libnvoptix.so*' -o -name 'libGLX_nvidia.so*' \
-                    -o -name 'libEGL_nvidia.so*' -o -name 'libGLESv1_CM_nvidia.so*' \
-                    -o -name 'libGLESv2_nvidia.so*' \) 2>/dev/null | wc -l)
+                left=0
+                for d in $libs; do
+                  if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
+                  n=$(find "$d" -maxdepth 1 \( -type f -o -type l \) \( $drv \) 2>/dev/null | wc -l)
+                  left=$((left + n))
+                done
                 bleft=0
-                for d in /usr/bin /usr/local/bin /usr/sbin; do
+                for d in $bins; do
                   if [ ! -d "$d" ]; then continue; fi
                   n=$(find "$d" -maxdepth 1 \( -type f -o -type l \) -name 'nvidia*' 2>/dev/null | wc -l)
                   bleft=$((bleft + n))
