@@ -38,9 +38,15 @@ Canonical files:
   `validate / validate`, defined in `opencharly/.github`); this repo has **no
   per-repo candy gate** and ships only `.github/workflows/tag-on-merge.yml`.
 - The candy's `plan:` `check:` steps are the functional evidence; they must stay
-  valid on every distro arm they run on. Scope a distro-specific check in the
-  command itself — the check runner does not honour runner-level
-  `exclude-distro` fields.
+  valid on every distro arm they run on. A `check:` step may declare
+  `exclude_distro:`, and the check runner honours it (`RunOne` in
+  `sdk/kit/planrun.go`): it skips the step when any of the IMAGE's distro TAGS
+  intersects the list, seeded by the box and live gathers from the image
+  metadata. The field filters distro tags, so it cannot express "the fact holds
+  by construction on this arm" — where the probe's subject is distro-specific
+  and the non-matching arm passes trivially, scope the guard in the command and
+  exit 0 honestly. The BUILD emitter never reads the field: a `run:` install
+  step's `exclude_distro:` is inert at image-build time.
 
 ## Modify this repo
 

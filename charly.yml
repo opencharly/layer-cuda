@@ -439,8 +439,12 @@ cuda:
                 exists: true
             - check: "a CUDA translation unit COMPILES AND LINKS against the stitched /usr layout (Arch: the header subtrees are linked, not only the top-level files)"
               id: cuda-arch-header-root
-              # Scoped IN THE COMMAND deliberately: the check runner does not honour runner-level
-              # exclude-distro fields, and Fedora's RPMs land in /usr directly so its layout differs.
+              # Scoped IN THE COMMAND deliberately -- but NOT because the runner ignores
+              # `exclude_distro:`: it honours it (`RunOne`, sdk/kit/planrun.go:181-189, filtering
+              # the IMAGE's distro tags). This probe asks whether the ARCH header subtrees are
+              # linked; on Fedora the RPMs land in /usr directly, so the fact holds by
+              # construction there and the step exits 0 (an honest pass) rather than SKIP. The
+              # guard keys on the distro's own marker, /etc/arch-release.
               #
               # This is the probe the plan was missing. `nvcc --version` proves nvcc RUNS and the
               # cuDNN probe proves one top-level header arrived -- but neither can FAIL on a layout
