@@ -288,10 +288,18 @@ cuda:
                 -o -name libnvcuvid.so* -o -name libnvoptix.so* -o -name libGLX_nvidia.so* \
                 -o -name libEGL_nvidia.so* -o -name libGLESv1_CM_nvidia.so* \
                 -o -name libGLESv2_nvidia.so*"
+                # The lib LAYOUTS and the driver TREES are layout-scoped, not one path:
+                # /usr/lib64 is a symlink to `lib` on Arch/CachyOS but a REAL directory on
+                # Fedora, and multilib adds /usr/lib32. A single hard-coded /usr/lib tree
+                # removal therefore leaves the other trees baked while the strip reports
+                # success (opencharly/layer-cuda#28). All three layouts are walked for the
+                # libraries, the nvidia/vdpau trees AND the xorg driver, from this ONE
+                # definition.
+                #
                 # Overridable so the step can be EXECUTED against a fixture -- that is how its
                 # discriminating power is proven without a GPU and without an image build
                 # (same device layer-cdi's build assertion uses).
-                libs=${CUDA_STRIP_LIB_DIRS:-/usr/lib /usr/lib64}
+                libs=${CUDA_STRIP_LIB_DIRS:-/usr/lib /usr/lib32 /usr/lib64}
                 bins=${CUDA_STRIP_BIN_DIRS:-/usr/bin /usr/local/bin /usr/sbin}
 
                 # THE BASELINE. Snapshot every shared library AND static archive present BEFORE
@@ -313,8 +321,12 @@ cuda:
                   n=$(printf '%s\n' "$out" | grep -c . || true)
                   removed=$((removed + n))
                 done
-                rm -rf /usr/lib/nvidia /usr/lib/vdpau /usr/lib/xorg/modules/drivers/nvidia_drv.so
-                echo "dropped $removed driver library file(s) plus the xorg/vdpau driver trees"
+                for d in $libs; do
+                  if [ ! -d "$d" ]; then continue; fi
+                  rm -rf "$d/nvidia" "$d/vdpau"
+                  rm -f "$d/xorg/modules/drivers/nvidia_drv.so"
+                done
+                echo "dropped $removed driver library file(s) plus the nvidia/vdpau/xorg driver trees"
 
                 # THE SURVIVAL ASSERTION -- the control this step was missing. It proved what
                 # it DELETED (the residue count below) and never what it must KEEP, so an
@@ -390,6 +402,28 @@ cuda:
                 echo "host-coupled nvidia binaries still baked after the strip: $bleft"
                 test "$left" -eq 0 || exit 1
                 test "$bleft" -eq 0 || exit 1
+                # THE TREE SIDE of the same control. The library predicate above walks `$libs`,
+                # and so must the trees: the nvidia/vdpau directories AND the xorg driver file
+                # are per-layout too, and a single /usr/lib removal reported success while
+                # /usr/lib64/vdpau, /usr/lib32/vdpau and /usr/lib64/xorg/modules/drivers/
+                # nvidia_drv.so stayed baked (opencharly/layer-cuda#28). Symlinked layouts are
+                # skipped HERE so one inode reachable through two names is not counted twice.
+                trees=0
+                for d in $libs; do
+                  if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
+                  for t in nvidia vdpau; do
+                    if [ -e "$d/$t" ] || [ -L "$d/$t" ]; then
+                      echo "DRIVER TREE STILL BAKED: $d/$t"
+                      trees=$((trees + 1))
+                    fi
+                  done
+                  if [ -e "$d/xorg/modules/drivers/nvidia_drv.so" ] || [ -L "$d/xorg/modules/drivers/nvidia_drv.so" ]; then
+                    echo "DRIVER TREE STILL BAKED: $d/xorg/modules/drivers/nvidia_drv.so"
+                    trees=$((trees + 1))
+                  fi
+                done
+                echo "driver trees still baked after the strip: $trees (must be 0)"
+                test "$trees" -eq 0 || exit 1
             - check: the nvcc CUDA compiler driver is on the canonical /usr path
               file:
                 file: /usr/bin/nvcc
