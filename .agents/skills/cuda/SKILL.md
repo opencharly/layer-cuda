@@ -1,27 +1,37 @@
 ---
 name: cuda
 description: 'CUDA toolkit, cuDNN, ONNX Runtime, and NVIDIA GPU development libraries
-  from negativo17 repos.
-
-  Depends on the nvidia candy for runtime support. Use when working with GPU computing,
-  CUDA,
-
-  cuDNN, machine learning infrastructure, or NVIDIA development tools.'
+  from the NVIDIA CUDA repo plus negativo17 on Fedora, and from the Arch repos on
+  Arch/CachyOS. Carries NO driver dependency: a pod takes its driver from the host
+  through the CDI spec, and a VM box composes layer-nvidia itself. Use when working
+  with GPU computing, CUDA, cuDNN, machine learning infrastructure, or NVIDIA
+  development tools.'
 ---
 
 # cuda -- CUDA development toolkit
 
-CUDA compiler, cuDNN, ONNX Runtime, and GPU development libraries. Depends on the `nvidia` candy for its
-package arms and its ordering, not for what survives: this layer's own strip removes the driver user-space
-`nvidia-utils` drags in (including `nvidia-ctk`'s siblings), so a cuda-composing image carries neither a
-driver library nor an `nvidia*` binary.
+CUDA compiler, cuDNN, ONNX Runtime, and GPU development libraries. This layer is the **toolkit**,
+and it deliberately carries **no driver dependency**: `layer-nvidia` is the *driver*, and the
+driver's contract is decided by the substrate, not by the toolkit.
+
+- A **pod** takes the driver from the host: the kernel module is host-global and the runtime
+  injects the user-space per container through `/etc/cdi/nvidia.yaml`. A pod image that bakes a
+  driver user-space shadows the host's (`layer-cdi`'s `cdi-no-baked-driver-binaries` fails the
+  build when it does).
+- A **VM** owns its kernel and must bake the driver itself, so a VM / NVIDIA-substrate box
+  composes `layer-nvidia` **at the box level** (`opencharly/vm-nvidia`).
+
+A `require:` here is target-blind: it pushed the driver into every pod that composed the toolkit,
+and this layer's own strip then removed it again, leaving `layer-nvidia`'s baked `check:` steps
+asserting `/usr/bin/nvidia-ctk` on an image whose composition deletes it
+(opencharly/layer-nvidia#25, opencharly/spec#395).
 
 ## Candy Properties
 
 | Property | Value |
 |----------|-------|
 | Install files | `task:`, `charly.yml` |
-| Depends | `nvidia`, `ffmpeg` |
+| Depends | `ffmpeg` |
 
 ## Environment Variables
 
@@ -35,7 +45,7 @@ RPM: `cuda-nvcc`, `cuda-cudart-devel`, `cuda-cudart-static`, `cuda-nvrtc-devel`,
 
 PAC: `cuda`, `cudnn`, `python-onnxruntime-cpu`
 
-**Note:** FFmpeg codec libraries are provided via the `ffmpeg` dependency candy rather than installed directly. On Fedora, CUDA packages come from the negativo17 `fedora-nvidia` repo (added by the `nvidia` candy); on Arch/CachyOS they come from the standard repos.
+**Note:** FFmpeg codec libraries are provided via the `ffmpeg` dependency candy rather than installed directly. On Fedora, CUDA packages come from the NVIDIA CUDA repo this layer declares plus negativo17's `fedora-multimedia` (for `onnxruntime`), both in the `distro.fedora.repo:` block — the toolkit does not borrow another candy's repos. On Arch/CachyOS they come from the standard repos.
 
 ## Multi-distro (Fedora + Arch)
 
@@ -90,23 +100,45 @@ Extracts cuDNN headers from `cuda-cudnn-devel` RPM (bypasses driver dependency v
 
 ## Usage
 
+A **pod**: compose the toolkit only. The driver is injected by the host through the CDI spec, so
+the image names no driver layer at all.
+
 ```yaml
-# charly.yml
-nvidia:
-  base: fedora-nonfree
+# charly.yml — a pod image
+nvidia-cdi:
   candy:
-    - nvidia
-    - cuda
+    base: fedora-nonfree
+    candy:
+      - '@github.com/opencharly/layer-cdi:v2026.323.0156'
+      - '@github.com/opencharly/layer-cuda:v2026.321.1520'
+```
+
+A **VM**: the box names `layer-nvidia` itself, beside the toolkit. The two are siblings at the
+box level, never a `require:` inside either layer.
+
+```yaml
+# charly.yml — the passthrough-VM base (opencharly/vm-nvidia)
+vm-nvidia:
+  candy:
+    base: cachyos.cachyos
+    candy:
+      - '@github.com/opencharly/layer-nvidia:v2026.322.1139'
+      - '@github.com/opencharly/layer-cuda:v2026.321.1520'
 ```
 
 ## Used In Boxes
 
-- `/charly-distros:nvidia` (base for all GPU boxes)
-- `/charly-immich:immich-ml`
+- `nvidia-cdi` — the GPU pod base, in both `opencharly/distro-fedora` and
+  `opencharly/distro-cachyos` (the toolkit, with the driver left to CDI)
+- `vm-nvidia` — the GPU-passthrough VM base (`opencharly/vm-nvidia`), which composes
+  `layer-nvidia` beside this layer
+- `cuda-arch-builder` — the CUDA-capable NVENC builder (`opencharly/distro-arch`)
+- `versa`, `immich-ml-cdi` — the toolkit on a pod
 
 ## Related Candies
 
-- `/charly-distros:nvidia` — NVIDIA GPU runtime (driver libs, CDI toolkit) — required dependency
+- `/charly-distros:nvidia` — NVIDIA GPU **driver** (driver libs, CDI toolkit). Not a dependency of
+  this layer: a VM / NVIDIA-substrate box composes it at the box level, and a pod composes it never.
 - `/charly-selkies:ffmpeg` — FFmpeg multimedia (nonfree codecs) — required dependency
 - `/charly-distros:rocm` — AMD GPU counterpart (ROCm runtime + OpenCL)
 - `/charly-languages:python-ml` — ML Python environment (depends on cuda)

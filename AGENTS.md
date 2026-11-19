@@ -2,10 +2,18 @@
 
 Standalone candy repo for the `cuda` layer — the CUDA toolkit, cuDNN, and ONNX
 Runtime stitched into the canonical `/usr` layout on Fedora and Arch. The candy
-lives in `charly.yml` at the repo root: the `require:` deps (`nvidia`, `ffmpeg`),
-the per-distro package arms and repos, the `CUDA_HOME` environment, the stitch +
-extract `plan:` steps, the `check:` assertions, and the embedded `skill:` entity
-projected into the marketplace corpus as `/charly-distros:cuda`.
+lives in `charly.yml` at the repo root: the `require:` dep (`ffmpeg` — the
+toolkit carries NO driver dependency, see below), the per-distro package arms and
+repos, the `CUDA_HOME` environment, the stitch + extract `plan:` steps, the
+`check:` assertions, and the embedded `skill:` entity projected into the
+marketplace corpus as `/charly-distros:cuda`.
+
+**No `layer-nvidia` in `require:` — this is architectural, not incidental.** This
+layer is the toolkit; `layer-nvidia` is the driver, and which substrate supplies
+the driver is decided by the BOX, never by a layer: a pod takes it from the host
+through the CDI spec and must bake none, a VM composes `layer-nvidia` at the box
+level. Do not reintroduce the require (opencharly/layer-nvidia#25,
+opencharly/spec#395).
 
 Canonical files:
 
