@@ -335,14 +335,16 @@ cuda:
                 libs=${CUDA_STRIP_LIB_DIRS:-/usr/lib /usr/lib64}
                 bins=${CUDA_STRIP_BIN_DIRS:-/usr/bin /usr/local/bin /usr/sbin}
 
-                # THE BASELINE. Snapshot every shared library present BEFORE the strip. The survival
+                # THE BASELINE. Snapshot every shared library AND static archive present BEFORE
+                # the strip (the toolkit ships libcudart_static.a and libcudadevrt.a beside the
+                # .so family, and a bare-prefix regression takes them too). The survival
                 # assertion below judges the strip against it, and it is taken BEFORE the
                 # deletion on purpose: a post-hoc search of the directory would find the file
                 # already gone and could never judge it.
                 before=$(mktemp)
                 for d in $libs; do
                   if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
-                  find "$d" -maxdepth 1 \( -type f -o -type l \) -name '*.so*' 2>/dev/null || true
+                  find "$d" -maxdepth 1 \( -type f -o -type l \) \( -name '*.so*' -o -name '*.a' \) 2>/dev/null || true
                 done | sort > "$before"
 
                 removed=0
@@ -363,12 +365,15 @@ cuda:
                 # (layer-cuda#23). The judge is the set of libraries THIS layer installs --
                 # not the driver pattern set, which would make the test a tautology: a library
                 # from that set that existed before the strip and is gone after it means the
-                # pattern set is over-broad, and it is named and failed HERE.
+                # pattern set is over-broad, and it is named and failed HERE. The names are
+                # prefix-matched rather than `.so`-matched so the static archives
+                # (`libcudart_static.a`, `libcudadevrt.a`, `libcublas_static.a`, ...) are
+                # inside the guard, not beside it.
                 killed=0
                 while IFS= read -r p; do
                   if [ -e "$p" ] || [ -L "$p" ]; then continue; fi
                   case "$(basename "$p")" in
-                    libcudart*.so*|libnvrtc*.so*|libcublas*.so*|libcudnn*.so*|libnvJitLink*.so*|libcurand*.so*|libcufft*.so*|libcusparse*.so*|libcusolver*.so*|libnccl*.so*)
+                    libcudart*|libcudadevrt*|libnvrtc*|libcublas*|libcudnn*|libnvJitLink*|libcurand*|libcufft*|libcusparse*|libcusolver*|libnccl*)
                       echo "STRIP DELETED A CUDA RUNTIME/COMPUTE LIBRARY: $p"
                       killed=$((killed + 1)) ;;
                   esac
