@@ -94,12 +94,14 @@ families apart, which is exactly how the runtime came to be deleted while the bu
 directory lists are overridable (`CUDA_STRIP_LIB_DIRS`, `CUDA_STRIP_BIN_DIRS`) so the step can be executed
 against a fixture without a GPU or an image build.
 
-The libraries **and** the `nvidia`/`vdpau` driver trees are walked in every lib layout the image has —
-`/usr/lib`, `/usr/lib32` and `/usr/lib64` — not a hard-coded `/usr/lib`. `/usr/lib64` is a symlink to `lib`
+The libraries, the `nvidia`/`vdpau` driver trees and the Xorg driver
+(`xorg/modules/drivers/nvidia_drv.so`) are walked in every lib layout the image has — `/usr/lib`,
+`/usr/lib32` and `/usr/lib64` — not a hard-coded `/usr/lib`. `/usr/lib64` is a symlink to `lib`
 on Arch/CachyOS but a REAL directory on Fedora, and multilib adds `/usr/lib32`; a single-path
-`rm -rf /usr/lib/vdpau` therefore reports success while `/usr/lib64/vdpau` and `/usr/lib32/vdpau` stay baked
-(opencharly/layer-cuda#28). The tree assertion names every surviving tree and fails the build, and a
-symlinked layout is skipped there so one inode reachable through two names is not counted twice.
+`rm -rf /usr/lib/vdpau` therefore reports success while `/usr/lib64/vdpau`, `/usr/lib32/vdpau` and
+`/usr/lib64/xorg/modules/drivers/nvidia_drv.so` stay baked (opencharly/layer-cuda#28). The tree
+assertion names every surviving tree and the Xorg driver, and fails the build; a symlinked layout is
+skipped there so one inode reachable through two names is not counted twice.
 
 ## Install tasks
 

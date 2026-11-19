@@ -293,7 +293,8 @@ cuda:
                 # Fedora, and multilib adds /usr/lib32. A single hard-coded /usr/lib tree
                 # removal therefore leaves the other trees baked while the strip reports
                 # success (opencharly/layer-cuda#28). All three layouts are walked for the
-                # libraries AND for the nvidia/vdpau trees, from this ONE definition.
+                # libraries, the nvidia/vdpau trees AND the xorg driver, from this ONE
+                # definition.
                 #
                 # Overridable so the step can be EXECUTED against a fixture -- that is how its
                 # discriminating power is proven without a GPU and without an image build
@@ -323,8 +324,8 @@ cuda:
                 for d in $libs; do
                   if [ ! -d "$d" ]; then continue; fi
                   rm -rf "$d/nvidia" "$d/vdpau"
+                  rm -f "$d/xorg/modules/drivers/nvidia_drv.so"
                 done
-                rm -f /usr/lib/xorg/modules/drivers/nvidia_drv.so
                 echo "dropped $removed driver library file(s) plus the nvidia/vdpau/xorg driver trees"
 
                 # THE SURVIVAL ASSERTION -- the control this step was missing. It proved what
@@ -402,10 +403,11 @@ cuda:
                 test "$left" -eq 0 || exit 1
                 test "$bleft" -eq 0 || exit 1
                 # THE TREE SIDE of the same control. The library predicate above walks `$libs`,
-                # and so must the trees: the nvidia/vdpau directories are per-layout too, and a
-                # single /usr/lib removal reported success while /usr/lib64/vdpau and
-                # /usr/lib32/vdpau stayed baked (opencharly/layer-cuda#28). Symlinked layouts
-                # are skipped HERE so one inode reachable through two names is not counted twice.
+                # and so must the trees: the nvidia/vdpau directories AND the xorg driver file
+                # are per-layout too, and a single /usr/lib removal reported success while
+                # /usr/lib64/vdpau, /usr/lib32/vdpau and /usr/lib64/xorg/modules/drivers/
+                # nvidia_drv.so stayed baked (opencharly/layer-cuda#28). Symlinked layouts are
+                # skipped HERE so one inode reachable through two names is not counted twice.
                 trees=0
                 for d in $libs; do
                   if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
@@ -415,11 +417,11 @@ cuda:
                       trees=$((trees + 1))
                     fi
                   done
+                  if [ -e "$d/xorg/modules/drivers/nvidia_drv.so" ] || [ -L "$d/xorg/modules/drivers/nvidia_drv.so" ]; then
+                    echo "DRIVER TREE STILL BAKED: $d/xorg/modules/drivers/nvidia_drv.so"
+                    trees=$((trees + 1))
+                  fi
                 done
-                if [ -e /usr/lib/xorg/modules/drivers/nvidia_drv.so ]; then
-                  echo "DRIVER TREE STILL BAKED: /usr/lib/xorg/modules/drivers/nvidia_drv.so"
-                  trees=$((trees + 1))
-                fi
                 echo "driver trees still baked after the strip: $trees (must be 0)"
                 test "$trees" -eq 0 || exit 1
             - check: the nvcc CUDA compiler driver is on the canonical /usr path
