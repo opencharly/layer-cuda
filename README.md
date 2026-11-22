@@ -71,6 +71,6 @@ ls /usr/lib64/libcudart.so*
 - GPU runtime: `/charly-distros:nvidia`
 - Codecs: `/charly-selkies:ffmpeg`
 - Derived GPU boxes: `/charly-languages:python-ml`, `/charly-jupyter:jupyter`,
-  `/charly-ollama:ollama`, `/charly-comfyui:comfyui`, `/charly-immich:immich-ml`
+  `/charly-ollama:ollama`, `/charly-comfyui:comfyui`, `/charly-immich:immich`
 - [`opencharly/charly`](https://github.com/opencharly/charly) — the charly CLI and image builder
 - [`opencharly/opencharly`](https://github.com/opencharly/opencharly) — the umbrella

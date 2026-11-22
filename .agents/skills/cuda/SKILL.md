@@ -142,7 +142,7 @@ vm-nvidia:
 - `vm-nvidia` — the GPU-passthrough VM base (`opencharly/vm-nvidia`), which composes
   `layer-nvidia` beside this layer
 - `cuda-arch-builder` — the CUDA-capable NVENC builder (`opencharly/distro-arch`)
-- `versa`, `immich-ml-cdi` — the toolkit on a pod
+- `versa`, `immich-cdi` — the toolkit on a pod
 
 ## Related Candies
 
