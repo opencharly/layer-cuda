@@ -490,9 +490,3 @@ cuda-skill:
         name: cuda
         family: distros
         owner: cuda
-        description: |-
-            CUDA toolkit, cuDNN, ONNX Runtime, and NVIDIA GPU development libraries from the NVIDIA
-            CUDA repo plus negativo17 on Fedora, and from the Arch repos on Arch/CachyOS.
-            Carries NO driver dependency: a pod takes its driver from the host through the CDI spec,
-            and a VM box composes the driver layer itself, at the box level. Use when working with
-            GPU computing, CUDA, cuDNN, machine learning infrastructure, or NVIDIA development tools.
