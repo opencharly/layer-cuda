@@ -148,9 +148,14 @@ cuda:
                   left=$((left + n))
                 done
                 for d in /usr/lib /usr/lib32 /usr/lib64; do
-                  for t in nvidia vdpau; do
-                    [ -e "$d/$t" ] && left=$((left + 1))
-                  done
+                  # The `nvidia` tree exists ONLY from the driver package; a plain `vdpau` tree
+                  # does not -- the generic libvdpau (pulled by ffmpeg) ships
+                  # `/usr/lib/vdpau/libvdpau_trace.so`, so only the DRIVER file counts there.
+                  [ -e "$d/nvidia" ] && left=$((left + 1))
+                  if [ -d "$d/vdpau" ]; then
+                    n=$(find "$d/vdpau" -maxdepth 1 -name 'libvdpau_nvidia*' 2>/dev/null | wc -l)
+                    left=$((left + n))
+                  fi
                   x="$d/xorg/modules/drivers"
                   if [ -d "$x" ]; then
                     n=$(find "$x" -maxdepth 1 -name 'nvidia*' 2>/dev/null | wc -l)
