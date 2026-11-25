@@ -39,14 +39,16 @@ Per-distro packages:
 Compose the layer by pinning this repo in a box's `candy:` list:
 
 ```yaml
-my-gpu-box:
+my-gpu-builder:
   candy:
-    base: fedora-nonfree
+    base: cachyos.cachyos
     candy:
-      - '@github.com/opencharly/layer-cuda:v2026.243.0408'
+      - '@github.com/opencharly/layer-cuda:v2026.326.2259'
 ```
 
-The `nvidia` dependency supplies the runtime; `cuda` adds the toolkit. After the
+A pod does not compose this layer directly: it takes the driver from the host through CDI and
+composes the toolkit only when its class needs it (`podcdi.pod-cdi` owns that today, see
+`/charly-distros:cdi`). A VM composes `layer-nvidia` beside it. After the
 image is built (no physical GPU needed to verify the artifacts):
 
 ```bash
