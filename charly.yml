@@ -220,7 +220,8 @@ cuda:
             # prefix family is not the driver's -- it also contains `libcudart*` and
             # `libcudadevrt*`, i.e. the CUDA RUNTIME this layer exists to install. Measured
             # on a built image (ghcr.io/opencharly/nvidia-cdi-layer-cuda, check-comfyui-pod
-            # 2026.323.0032), after this step had run:
+            # 2026.323.0032 — the Fedora `nvidia-cdi` box, since dropped in
+            # opencharly/distro-fedora#137), after this step had run:
             #   /opt/cuda/lib64/libcudart.so, .so.13, .so.13.5.37   the stitch SOURCE, intact
             #   /usr/lib64/libcudart_static.a                       the only cudart file left
             #   /usr/lib64/libcudart.so*                            gone -- `ls` exits 2

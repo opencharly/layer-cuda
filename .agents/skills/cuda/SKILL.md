@@ -113,7 +113,8 @@ A **pod**: compose the toolkit only. The driver is injected by the host through 
 the image names no driver layer at all.
 
 ```yaml
-# charly.yml — a pod image (CachyOS only; the Fedora CDI boxes were dropped, #1287).
+# charly.yml — a pod image (CachyOS only; the Fedora CDI boxes were dropped in
+# opencharly/distro-fedora#137 — umbrella opencharly/opencharly#1287).
 # `pod-cdi` carries the contract and, today, the toolkit; the class split (a wheel-only
 # pod composes no toolkit) is opencharly/layer-cuda#39.
 comfyui-cdi:
@@ -132,8 +133,8 @@ vm-nvidia:
   candy:
     base: cachyos.cachyos
     candy:
-      - '@github.com/opencharly/layer-nvidia:v2026.322.1139'
-      - '@github.com/opencharly/layer-cuda:v2026.321.1520'
+      - '@github.com/opencharly/layer-nvidia:v2026.327.0533'
+      - '@github.com/opencharly/layer-cuda:v2026.326.2259'
 ```
 
 ## Used In Boxes
