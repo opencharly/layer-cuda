@@ -107,6 +107,21 @@ cuda:
                       url: "https://negativo17.org/repos/fedora-multimedia.repo"
                       gpgkey: "https://negativo17.org/repos/RPM-GPG-KEY-slaanesh"
         plan:
+            - run: install the CUDA toolkit driver-free — opencl-nvidia is satisfied at runtime by the CDI-injected driver
+              run_as: root
+              command: |
+                if [ ! -f /etc/arch-release ]; then
+                  exit 0
+                fi
+                # `cuda` (pac) depends on `opencl-nvidia`, whose three files are the ONLY
+                # host-coupled driver user-space the toolkit brings; `cudnn` depends on
+                # `cuda`. Treating that dependency as satisfied keeps the driver out of the
+                # image at the SOURCE: the pod receives it from the host through CDI, the
+                # contract's only provider. Spiked in a disposable cachyos container with
+                # THIS exact command: nvcc + cudnn header + libcudart/libcublas present,
+                # zero driver residue, packages `cccl cuda cudnn`, no nvidia utils/binaries.
+                # It is the FIRST plan step so every later step sees the toolkit.
+                pacman -Syu --noconfirm --needed --assume-installed opencl-nvidia cuda cudnn
             - run: install the cuDNN headers from the cuda-cudnn-devel RPM on Fedora, bypassing its driver dependency
               run_as: root
               command: |
@@ -130,20 +145,6 @@ cuda:
                   done < <(find ./usr/lib64 -maxdepth 1 -name '*.so' -type l -print0 2>/dev/null)
                 fi
                 cd / && rm -rf "$CUDNN_DIR"
-            - run: install the CUDA toolkit driver-free — opencl-nvidia is satisfied at runtime by the CDI-injected driver
-              run_as: root
-              command: |
-                if [ ! -f /etc/arch-release ]; then
-                  exit 0
-                fi
-                # `cuda` (pac) depends on `opencl-nvidia`, whose three files are the ONLY
-                # host-coupled driver user-space the toolkit brings; `cudnn` depends on
-                # `cuda`. Treating that dependency as satisfied keeps the driver out of the
-                # image at the SOURCE: the pod receives it from the host through CDI, the
-                # contract's only provider. Spiked in a disposable cachyos container:
-                # nvcc + libcudart/libcublas present, zero driver residue, no
-                # nvidia-smi/nvidia-ctk.
-                pacman -Syu --noconfirm --needed --assume-installed opencl-nvidia cuda cudnn
             - run: stitch the Arch /opt/cuda toolkit into the canonical /usr layout — binaries, headers with their subtrees, and libraries
               run_as: root
               command: |
@@ -200,6 +201,23 @@ cuda:
                     ln -sfn "$entry" /usr/lib64/"$(basename "$entry")"
                   done
                 done
+            - run: assert the toolkit install baked NO driver user-space — the CDI mount is the only provider
+              run_as: root
+              command: |
+                set -eu
+                left=0
+                for d in /usr/lib /usr/lib32 /usr/lib64; do
+                  [ -d "$d" ] || continue
+                  n=$(find "$d" -maxdepth 1 \( -name 'libnvidia-*.so*' -o -name 'libcuda.so*' \
+                        -o -name 'libcudadebugger.so*' -o -name 'libnvcuvid*' -o -name 'libnvoptix*' \) \
+                        2>/dev/null | wc -l)
+                  left=$((left + n))
+                done
+                if [ "$left" -ne 0 ]; then
+                  echo "cuda: driver user-space baked although the toolkit install is driver-free: $left file(s)"
+                  exit 1
+                fi
+                echo "cuda: no driver user-space baked (the CDI mount is the only provider)"
             - check: the nvcc CUDA compiler driver is on the canonical /usr path
               file:
                 file: /usr/bin/nvcc
