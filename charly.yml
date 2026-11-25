@@ -131,26 +131,34 @@ cuda:
                   done
                 done
             - run: assert the toolkit install baked NO driver user-space — libraries, binaries and trees
+              id: cuda-no-baked-driver
               run_as: root
               command: |
                 set -eu
+                layouts=${CUDA_LIB_DIRS:-/usr/lib /usr/lib32 /usr/lib64}
+                bins=${CUDA_BIN_DIRS:-/usr/bin /usr/sbin}
                 left=0
-                for d in /usr/lib /usr/lib32 /usr/lib64; do
+                for d in $layouts; do
                   [ -d "$d" ] || continue
                   n=$(find "$d" -maxdepth 1 \( -name 'libnvidia-*.so*' -o -name 'libcuda.so*' \
                         -o -name 'libcudadebugger.so*' -o -name 'libnvcuvid*' -o -name 'libnvoptix*' \) \
                         2>/dev/null | wc -l)
                   left=$((left + n))
                 done
-                for d in /usr/bin /usr/sbin; do
+                for d in $bins; do
                   [ -d "$d" ] || continue
                   n=$(find "$d" -maxdepth 1 \( -type f -o -type l \) -name 'nvidia*' 2>/dev/null | wc -l)
                   left=$((left + n))
                 done
-                for d in /usr/lib /usr/lib32 /usr/lib64; do
-                  for t in nvidia vdpau; do
-                    [ -e "$d/$t" ] && left=$((left + 1))
-                  done
+                for d in $layouts; do
+                  # The `nvidia` tree exists ONLY from the driver package; a plain `vdpau` tree
+                  # does not -- the generic libvdpau (pulled by ffmpeg) ships
+                  # `/usr/lib/vdpau/libvdpau_trace.so`, so only the DRIVER file counts there.
+                  [ -e "$d/nvidia" ] && left=$((left + 1))
+                  if [ -d "$d/vdpau" ]; then
+                    n=$(find "$d/vdpau" -maxdepth 1 -name 'libvdpau_nvidia*' 2>/dev/null | wc -l)
+                    left=$((left + n))
+                  fi
                   x="$d/xorg/modules/drivers"
                   if [ -d "$x" ]; then
                     n=$(find "$x" -maxdepth 1 -name 'nvidia*' 2>/dev/null | wc -l)
