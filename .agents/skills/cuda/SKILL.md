@@ -1,8 +1,8 @@
 ---
 name: cuda
 description: 'CUDA toolkit, cuDNN, ONNX Runtime, and NVIDIA GPU development libraries
-  from the NVIDIA CUDA repo plus negativo17 on Fedora, and from the Arch repos on
-  Arch/CachyOS. Carries NO driver dependency: a pod takes its driver from the host
+  from the Arch/CachyOS repos (the Fedora arm was retired with the Fedora CDI boxes,
+  opencharly/distro-fedora#137). Carries NO driver dependency: a pod takes its driver from the host
   through the CDI spec, and a VM box composes layer-nvidia itself. Use when working
   with GPU computing, CUDA, cuDNN, machine learning infrastructure, or NVIDIA
   development tools.'
@@ -46,9 +46,9 @@ RPM: `cuda-nvcc`, `cuda-cudart-devel`, `cuda-cudart-static`, `cuda-nvrtc-devel`,
 
 PAC: `cuda`, `cudnn`, `python-onnxruntime-cpu`
 
-**Note:** FFmpeg codec libraries are provided via the `ffmpeg` dependency candy rather than installed directly. On Fedora, CUDA packages come from the NVIDIA CUDA repo this layer declares plus negativo17's `fedora-multimedia` (for `onnxruntime`), both in the `distro.fedora.repo:` block — the toolkit does not borrow another candy's repos. On Arch/CachyOS they come from the standard repos.
+**Note:** FFmpeg codec libraries are provided via the `ffmpeg` dependency candy rather than installed directly. CUDA packages come from the standard Arch/CachyOS repos; the Fedora arm was retired with the Fedora CDI boxes (opencharly/distro-fedora#137).
 
-## Multi-distro (Fedora + Arch)
+## Arch/CachyOS
 
 The candy is multi-distro. The `distro.arch` section installs `cuda`, `cudnn`,
 and `python-onnxruntime-cpu` from the Arch repos. Arch installs CUDA under
@@ -66,7 +66,7 @@ the `crt/` and `cccl/` subtrees, then the same glob missing the `.hpp` half of t
 preprocesses a real CUDA translation unit to prove the whole header root resolves.
 
 With that stitch in place, the same `nvcc`, header, and library paths resolve
-identically on Fedora and on Arch/CachyOS.
+identically on Arch/CachyOS.
 
 ## Driver user-space vs the CUDA runtime — installed driver-free at the SOURCE
 
@@ -92,7 +92,7 @@ a subject of this layer — nothing installs them.
 
 ## Install tasks
 
-Extracts cuDNN headers from `cuda-cudnn-devel` RPM (bypasses driver dependency via rpm2cpio) on Fedora; the `/opt/cuda → /usr` symlink stitch runs on Arch/CachyOS.
+Installs the toolkit driver-free (see above) and stitches `/opt/cuda → /usr` on Arch/CachyOS.
 
 ## Usage
 

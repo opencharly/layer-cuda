@@ -1,7 +1,7 @@
 # AGENTS.md — layer-cuda
 
 Standalone candy repo for the `cuda` layer — the CUDA toolkit, cuDNN, and ONNX
-Runtime stitched into the canonical `/usr` layout on Fedora and Arch. The candy
+Runtime stitched into the canonical `/usr` layout on Arch/CachyOS. The candy
 lives in `charly.yml` at the repo root: the `require:` dep (`ffmpeg` — the
 toolkit carries NO driver dependency, see below), the per-distro package arms and
 repos, the `CUDA_HOME` environment, the stitch + extract `plan:` steps, the
@@ -55,9 +55,7 @@ Canonical files:
   distro-arm, or behaviour change not mirrored in the skill leaves the corpus
   stale.
 - Package changes go in the top-level `package:` or a `distro:` arm; repository
-  and signing policy go in the matching `distro:` arm's `repo:` block. NVIDIA
-  rotates its repo signing key — the `cuda-fedora43-x86_64` `gpgkey` must name
-  the key the live `.repo` file declares.
+  and signing policy go in the matching `distro:` arm's `repo:` block.
 - New behaviour claims belong in the `plan:` as an observable `check:` step, and
   in the skill body.
 
