@@ -1,15 +1,14 @@
 # cuda
 
-CUDA toolkit layer for OpenCharly GPU images — Fedora and Arch.
+CUDA toolkit layer for OpenCharly GPU images — Arch/CachyOS.
 
 The `cuda` candy installs the CUDA compiler driver (`nvcc`), the CUDA runtime/dev
 libraries (`cudart`, `nvrtc`, `cupti`, `curand`, `cccl`, `cufile`), cuDNN, and
-onnxruntime, stitched into the canonical `/usr` layout on both Fedora and Arch.
-It depends on the `nvidia` candy for GPU runtime support and on `ffmpeg` for
-codec libraries.
+onnxruntime, stitched into the canonical `/usr` layout on Arch/CachyOS.
+It depends on the `ffmpeg` candy for codec libraries.
 
-On Fedora the RPMs land in `/usr` directly. On Arch the packages install under
-`/opt/cuda`, so post-install tasks symlink the binaries, headers, and libraries
+The packages install under `/opt/cuda`, so post-install tasks symlink
+the binaries, headers, and libraries
 into the same `/usr`-rooted paths. With that stitch in place, every downstream
 GPU consumer compiles against one layout regardless of distro. Each artifact is a
 real file or library on disk, so its presence is directly verifiable.
@@ -28,10 +27,6 @@ real file or library on disk, so its presence is directly verifiable.
 
 Per-distro packages:
 
-- `fedora` — `cuda-nvcc`, `cuda-cudart-devel`, `cuda-cudart-static`,
-  `cuda-nvrtc-devel`, `cuda-cupti-devel`, `cuda-cccl-devel`, `cuda-cudnn`,
-  `libcurand-devel`, `libcufile-devel`, `onnxruntime`, `libaio-devel`, `cpio`
-  (NVIDIA's CUDA repo + negativo17 `fedora-multimedia` for `onnxruntime`).
 - `arch` — `cuda`, `cudnn`, `python-onnxruntime-cpu`.
 
 ## How to use it
