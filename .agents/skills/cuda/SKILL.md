@@ -42,9 +42,7 @@ no strip step at all.
 
 ## Packages
 
-RPM: `cuda-nvcc`, `cuda-cudart-devel`, `cuda-cudart-static`, `cuda-nvrtc-devel`, `cuda-cupti-devel`, `cccl-devel`, `cuda-cudnn`, `libcurand-devel`, `libcufile-devel`, `onnxruntime`, `libaio-devel`, `cpio`
-
-PAC: `cuda`, `cudnn`, `python-onnxruntime-cpu`
+PAC: `python-onnxruntime-cpu` in the package arm; `cuda` and `cudnn` are installed by the plan step with `--assume-installed opencl-nvidia` (driver-free — the driver comes from the host through CDI).
 
 **Note:** FFmpeg codec libraries are provided via the `ffmpeg` dependency candy rather than installed directly. CUDA packages come from the standard Arch/CachyOS repos; the Fedora arm was retired with the Fedora CDI boxes (opencharly/distro-fedora#137).
 
