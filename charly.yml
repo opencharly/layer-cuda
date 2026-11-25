@@ -20,10 +20,10 @@ cuda:
             #   VM   the guest owns its kernel and must carry the driver itself.
             #
             # A `require:` is TARGET-BLIND: it pushed the driver into EVERY pod that composes
-            # this toolkit, which this layer's own `cuda-drop-driver-userspace` step then
-            # stripped again -- leaving layer-nvidia's baked `check:` assertions demanding
-            # /usr/bin/nvidia-ctk on an image whose composition deletes it, so no pod bed that
-            # composes the toolkit could ever go green (measured:
+            # this toolkit, and the driver then had to be stripped again -- leaving
+            # layer-nvidia's baked `check:` assertions demanding /usr/bin/nvidia-ctk on an
+            # image whose composition deletes it, so no pod bed that composes the toolkit
+            # could ever go green (measured:
             #   FAIL check the nvidia-ctk CLI binary lands on /usr/bin [layer-nvidia:4] exists=false
             #   FAIL check nvidia-ctk runs and reports a version        [layer-nvidia:5] exit=127
             # on opencharly/distro-cachyos `check-comfyui-pod`). opencharly/layer-nvidia#25 carries
@@ -46,19 +46,18 @@ cuda:
         distro:
             arch:
                 package:
-                    # Arch extra/cuda is a precompiled binary package — full toolkit
-                    # (nvcc, cudart, nvrtc, cupti, curand, cccl, cufile) at /opt/cuda.
-                    # Arch extra/cudnn is also precompiled; headers land at
-                    # /opt/cuda/targets/x86_64-linux/include/. The post-install symlink
-                    # task below maps these into /usr-rooted paths.
+                    # `cuda` and `cudnn` are NOT declared here: both are installed by the
+                    # plan step below with `--assume-installed opencl-nvidia`, so the
+                    # host-coupled OpenCL driver package never enters the image (measured:
+                    # opencl-nvidia is the toolkit's ONLY driver contamination). Arch
+                    # extra/cuda is a precompiled full toolkit at /opt/cuda; extra/cudnn
+                    # depends on it. The stitch steps below map them into /usr.
                     # python-onnxruntime-cpu is in the CachyOS extra repo (pulled
                     # transitively as a dependency); no AUR build needed — the bare
                     # `python-onnxruntime` AUR package fails to build under the
                     # rootless arch-builder stage. The check probe below maps
                     # `onnxruntime` to `python-onnxruntime-cpu` on Arch via
                     # package_map.
-                    - cuda
-                    - cudnn
                     - python-onnxruntime-cpu
             fedora:
                 package:
@@ -131,6 +130,20 @@ cuda:
                   done < <(find ./usr/lib64 -maxdepth 1 -name '*.so' -type l -print0 2>/dev/null)
                 fi
                 cd / && rm -rf "$CUDNN_DIR"
+            - run: install the CUDA toolkit driver-free — opencl-nvidia is satisfied at runtime by the CDI-injected driver
+              run_as: root
+              command: |
+                if [ ! -f /etc/arch-release ]; then
+                  exit 0
+                fi
+                # `cuda` (pac) depends on `opencl-nvidia`, whose three files are the ONLY
+                # host-coupled driver user-space the toolkit brings; `cudnn` depends on
+                # `cuda`. Treating that dependency as satisfied keeps the driver out of the
+                # image at the SOURCE: the pod receives it from the host through CDI, the
+                # contract's only provider. Spiked in a disposable cachyos container:
+                # nvcc + libcudart/libcublas present, zero driver residue, no
+                # nvidia-smi/nvidia-ctk.
+                pacman -Syu --noconfirm --needed --assume-installed opencl-nvidia cuda cudnn
             - run: stitch the Arch /opt/cuda toolkit into the canonical /usr layout — binaries, headers with their subtrees, and libraries
               run_as: root
               command: |
@@ -187,244 +200,6 @@ cuda:
                     ln -sfn "$entry" /usr/lib64/"$(basename "$entry")"
                   done
                 done
-            # ── The driver user-space this package PULLS IN must not be baked ────
-            # Arch's `cuda` package depends on `opencl-nvidia`, which ships the NVIDIA
-            # OpenCL driver library (/usr/lib/libnvidia-opencl.so.620.70.06 + its SONAME
-            # links). That library is HOST-COUPLED the same way nvidia-utils' driver
-            # user-space is: NVIDIA's CDI create-symlinks hook points each SONAME at the
-            # newest versioned copy present in the container, so an image copy newer than
-            # the host's kernel driver wins and NVML/OpenCL init fails against a module it
-            # does not match. Measured on a cachyos ollama image (host driver 615.78.08):
-            # this one file was the last baked driver library left after
-            # layer-nvidia's own strip, and it was reported by
-            # `nvidia-driver-libs-match-kernel-module` / the mount-info probe as
-            # `baked driver library: /usr/lib/libnvidia-opencl.so.620.70.06`.
-            #
-            # Each installer cleans up after itself, which is why this lives HERE and not
-            # only in the nvidia candy: nvidia-utils' files are installed before this
-            # stage, opencl-nvidia's are installed by it. The Vulkan/OpenCL ICD JSON stays
-            # (it names a SONAME, not a version, so the CDI-created link satisfies it).
-            # The cuda package DEPENDS on nvidia-utils on the pac path, so installing it
-            # re-extracts the WHOLE host-coupled driver user-space that the nvidia candy's
-            # `nvidia-drop-driver-userspace` step had already removed -- not just
-            # opencl-nvidia's share. Measured on CachyOS: host kernel module 615.78.08 vs a
-            # baked userspace 620.70.06 (the repo had moved ahead of the installed driver),
-            # after which the NVIDIA CDI `create-symlinks` hook pointed `libnvidia-ml.so.1`
-            # at the baked NEWER file, `nvidia-smi` exited 18 ("Driver/library version
-            # mismatch") and ollama's free-VRAM estimate yielded nothing usable, so inference
-            # silently offloaded 0/29 layers and ran on CPU. opencharly/layer-cuda#21.
-            #
-            # The installer that pulls the files in cleans up after itself, which is why this
-            # lives HERE and not only in the nvidia candy: this stage is what reinstalls them.
-            # layer-cuda#23: the pattern set was a PREFIX glob, `libcuda*.so*`, and that
-            # prefix family is not the driver's -- it also contains `libcudart*` and
-            # `libcudadevrt*`, i.e. the CUDA RUNTIME this layer exists to install. Measured
-            # on a built image (ghcr.io/opencharly/nvidia-cdi-layer-cuda, check-comfyui-pod
-            # 2026.323.0032 — the Fedora `nvidia-cdi` box, since dropped in
-            # opencharly/distro-fedora#137), after this step had run:
-            #   /opt/cuda/lib64/libcudart.so, .so.13, .so.13.5.37   the stitch SOURCE, intact
-            #   /usr/lib64/libcudart_static.a                       the only cudart file left
-            #   /usr/lib64/libcudart.so*                            gone -- `ls` exits 2
-            # so the layer's own `ls /usr/lib64/libcudart.so*` check could never pass. The
-            # set is anchored to the DRIVER names now -- `libcuda.so*`, not `libcuda*` --
-            # plus `libcudadebugger.so*`, which IS driver user-space but does not carry the
-            # `libcuda.so` stem (it is in the CDI spec's injected set) -- and the step now asserts
-            # what it KEEPS, not only what it deletes: every CUDA runtime/compute library that
-            # was present before the strip must still be present after it, or the build fails
-            # naming the file it killed.
-            - run: drop the driver user-space the cuda package reinstalls through nvidia-utils, so the CDI mount is its only provider
-              id: cuda-drop-driver-userspace
-              run_as: root
-              command: |
-                set -eu
-                # ── THE PATTERN SET IS THE DRIVER USER-SPACE, AND NOTHING ELSE ──────────
-                # The three families that share a directory in this image (measured, see the
-                # comment block above):
-                #   DRIVER   libcuda.so{,.1,.<ver>}  libcudadebugger.so{,.1,.<ver>}  libnvidia-*.so*  ...
-                #   RUNTIME  libcudart.so{,.13,.13.5.37}  libcudart_static.a  libcudadevrt.a
-                #   COMPUTE  libcublas*, libcudnn*, libnvrtc*, libcurand*, libcufft*, ...
-                # The strip may only ever delete the FIRST family. A PREFIX glob cannot say
-                # that: `libcuda*` matches every member of the "libcuda" prefix family --
-                # libcuda.so*, libcudart*, libcudadebugger*, libcudadevrt* -- so it deleted
-                # the runtime this very layer installs and stitched, and the layer's own
-                # `ls /usr/lib64/libcudart.so*` check then exited 2 (layer-cuda#23).
-                # The `.` anchors it: `libcuda.so*` is the driver and only the driver.
-                #
-                # `libcudadebugger.so*` is listed EXPLICITLY because it is also driver
-                # user-space -- the NVIDIA CDI spec injects /usr/lib/libcudadebugger.so.<ver>
-                # (measured: /etc/cdi/nvidia.yaml, `nvidia-ctk cdi generate`), so a baked copy
-                # is host-coupled in exactly the way this step exists to prevent -- but it
-                # does not carry the `libcuda.so` stem, so anchoring alone would leave it
-                # behind. `libnvidia-*` covers nvidia-ml, eglcore, glcore, encode, ptxjitcompiler
-                # and the rest of the injected set; the tree and xorg removals below cover the
-                # three surfaces that are not top-level libraries.
-                #
-                # ONE definition, used by the delete, by the residue re-check AND by nothing else: three
-                # copies of a predicate is how the over-broad glob got in and stayed in.
-                #
-                # ── DRIFT CONTROL: this assignment has TWO byte-identical twins ────────
-                # `opencharly/layer-cdi`'s `cdi-no-baked-driver-libs` and
-                # `opencharly/layer-nvidia`'s `nvidia-drop-driver-userspace` each hold the
-                # five lines from `set -f` through the closing quote BYTE FOR BYTE: all
-                # three strip the same driver set at a different point in the composition,
-                # so a predicate that drifts between them deletes different files on each
-                # arm. The empty diff IS the control:
-                #
-                #   $ for twin in layer-cdi layer-nvidia; do
-                #       diff <(sed -n '/^                set -f$/,/libGLESv2_nvidia.so\*"$/p' layer-cuda/charly.yml) \
-                #            <(sed -n '/^                set -f$/,/libGLESv2_nvidia.so\*"$/p' "$twin/charly.yml")
-                #     done
-                #   (no output for either -- both copies identical, measured 2026-11-19)
-                #
-                # A change here MUST move BOTH copies AND layer-cdi's `require:` tag in the
-                # same cutover, or the consumer asserts a layout this step just changed
-                # (opencharly/layer-cuda#27).
-                #
-                # `set -f` is load-bearing. $drv is expanded UNQUOTED -- that is how the -o
-                # chain is spliced into the find(1) expression -- and without it the shell
-                # would pathname-expand `libcuda.so*` against the CURRENT DIRECTORY before
-                # find ever saw it.
-                set -f
-                drv="-name libnvidia-*.so* -o -name libcuda.so* -o -name libcudadebugger.so* \
-                -o -name libnvcuvid.so* -o -name libnvoptix.so* -o -name libGLX_nvidia.so* \
-                -o -name libEGL_nvidia.so* -o -name libGLESv1_CM_nvidia.so* \
-                -o -name libGLESv2_nvidia.so*"
-                # The lib LAYOUTS and the driver TREES are layout-scoped, not one path:
-                # /usr/lib64 is a symlink to `lib` on Arch/CachyOS but a REAL directory on
-                # Fedora, and multilib adds /usr/lib32. A single hard-coded /usr/lib tree
-                # removal therefore leaves the other trees baked while the strip reports
-                # success (opencharly/layer-cuda#28). All three layouts are walked for the
-                # libraries, the nvidia/vdpau trees AND the xorg driver, from this ONE
-                # definition.
-                #
-                # Overridable so the step can be EXECUTED against a fixture -- that is how its
-                # discriminating power is proven without a GPU and without an image build
-                # (same device layer-cdi's build assertion uses).
-                libs=${CUDA_STRIP_LIB_DIRS:-/usr/lib /usr/lib32 /usr/lib64}
-                bins=${CUDA_STRIP_BIN_DIRS:-/usr/bin /usr/local/bin /usr/sbin}
-
-                # THE BASELINE. Snapshot every shared library AND static archive present BEFORE
-                # the strip (the toolkit ships libcudart_static.a and libcudadevrt.a beside the
-                # .so family, and a bare-prefix regression takes them too). The survival
-                # assertion below judges the strip against it, and it is taken BEFORE the
-                # deletion on purpose: a post-hoc search of the directory would find the file
-                # already gone and could never judge it.
-                before=$(mktemp)
-                for d in $libs; do
-                  if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
-                  find "$d" -maxdepth 1 \( -type f -o -type l \) \( -name '*.so*' -o -name '*.a' \) 2>/dev/null || true
-                done | sort > "$before"
-
-                removed=0
-                for d in $libs; do
-                  if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
-                  out=$(find "$d" -maxdepth 1 \( $drv \) -print -delete 2>/dev/null || true)
-                  n=$(printf '%s\n' "$out" | grep -c . || true)
-                  removed=$((removed + n))
-                done
-                for d in $libs; do
-                  if [ ! -d "$d" ]; then continue; fi
-                  rm -rf "$d/nvidia" "$d/vdpau"
-                  rm -f "$d/xorg/modules/drivers/nvidia_drv.so"
-                done
-                echo "dropped $removed driver library file(s) plus the nvidia/vdpau/xorg driver trees"
-
-                # THE SURVIVAL ASSERTION -- the control this step was missing. It proved what
-                # it DELETED (the residue count below) and never what it must KEEP, so an
-                # over-broad pattern could delete the CUDA runtime this layer just stitched
-                # and every build-time control still passed; the check that notices
-                # (`ls /usr/lib64/libcudart.so*`) runs a stage later, in another repo's plan
-                # (layer-cuda#23). The judge is the set of libraries THIS layer installs --
-                # not the driver pattern set, which would make the test a tautology: a library
-                # from that set that existed before the strip and is gone after it means the
-                # pattern set is over-broad, and it is named and failed HERE. The names are
-                # prefix-matched rather than `.so`-matched so the static archives
-                # (`libcudart_static.a`, `libcudadevrt.a`, `libcublas_static.a`, ...) are
-                # inside the guard, not beside it.
-                killed=0
-                while IFS= read -r p; do
-                  if [ -e "$p" ] || [ -L "$p" ]; then continue; fi
-                  case "$(basename "$p")" in
-                    libcudart*|libcudadevrt*|libnvrtc*|libcublas*|libcudnn*|libnvJitLink*|libcurand*|libcufft*|libcusparse*|libcusolver*|libnccl*)
-                      echo "STRIP DELETED A CUDA RUNTIME/COMPUTE LIBRARY: $p"
-                      killed=$((killed + 1)) ;;
-                  esac
-                done < "$before"
-                rm -f "$before"
-                echo "CUDA runtime/compute libraries the strip deleted: $killed (must be 0)"
-                test "$killed" -eq 0 || exit 1
-                # The BINARIES are host-coupled in exactly the same way, and the CDI injection
-                # mounts them too (measured in a live pod: nvidia-smi, nvidia-cuda-mps-control,
-                # nvidia-cuda-mps-server, nvidia-debugdump, nvidia-persistenced, nvidia-xconfig
-                # are all bind-mounted from the host). A baked copy is a second, wrong-version
-                # one, and for nvidia-smi it is actively misleading: it reports on the image's
-                # own libraries instead of the ones injected with the running driver.
-                #
-                # This deletes the WHOLE `nvidia*` set rather than a hand-listed subset. A
-                # subset is how this step first shipped and its own assertion caught three
-                # leftovers it had missed (nvidia-container-toolkit and its two
-                # nvidia-container-runtime.<variant> wrappers) -- because the package also
-                # ships nvidia-ngx-updater, nvidia-pcc, nvidia-powerd and nvidia-sleep.sh, and
-                # a list that has to be right about every one of them will be wrong again.
-                # None of them belong in an image: the NVIDIA CONTAINER TOOLKIT is HOST
-                # tooling -- it generates the CDI spec and lives on the operator's machine --
-                # so an image copy is a second, drifting one that nothing runs. This is also
-                # the canonical POD strip: layer-cdi deliberately keeps its own copy out
-                # (`cdi-no-baked-driver-binaries` only ASSERTS), which is why leaving the
-                # binary in place is not an option here -- a pod image that carries
-                # nvidia-ctk fails that assertion. The driver layer is therefore not a
-                # dependency of this one at all: which substrate supplies the driver is the
-                # BOX's decision, and a VM / NVIDIA box composes it itself (opencharly/vm-nvidia).
-                # The diagnosis of the alternative -- a venue-aware plan scope that would let a
-                # baked check declare itself inapplicable to a composition that strips its
-                # subject -- is in this repo's `require:` comment above.
-                binned=0
-                for d in $bins; do
-                  if [ ! -d "$d" ]; then continue; fi
-                  out=$(find "$d" -maxdepth 1 \( -type f -o -type l \) -name 'nvidia*' \
-                        -print -delete 2>/dev/null || true)
-                  n=$(printf '%s\n' "$out" | grep -c . || true)
-                  binned=$((binned + n))
-                done
-                echo "dropped $binned host-coupled nvidia binary/binaries"
-                left=0
-                for d in $libs; do
-                  if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
-                  n=$(find "$d" -maxdepth 1 \( -type f -o -type l \) \( $drv \) 2>/dev/null | wc -l)
-                  left=$((left + n))
-                done
-                bleft=0
-                for d in $bins; do
-                  if [ ! -d "$d" ]; then continue; fi
-                  n=$(find "$d" -maxdepth 1 \( -type f -o -type l \) -name 'nvidia*' 2>/dev/null | wc -l)
-                  bleft=$((bleft + n))
-                done
-                echo "driver library files still baked after the strip: $left"
-                echo "host-coupled nvidia binaries still baked after the strip: $bleft"
-                test "$left" -eq 0 || exit 1
-                test "$bleft" -eq 0 || exit 1
-                # THE TREE SIDE of the same control. The library predicate above walks `$libs`,
-                # and so must the trees: the nvidia/vdpau directories AND the xorg driver file
-                # are per-layout too, and a single /usr/lib removal reported success while
-                # /usr/lib64/vdpau, /usr/lib32/vdpau and /usr/lib64/xorg/modules/drivers/
-                # nvidia_drv.so stayed baked (opencharly/layer-cuda#28). Symlinked layouts are
-                # skipped HERE so one inode reachable through two names is not counted twice.
-                trees=0
-                for d in $libs; do
-                  if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
-                  for t in nvidia vdpau; do
-                    if [ -e "$d/$t" ] || [ -L "$d/$t" ]; then
-                      echo "DRIVER TREE STILL BAKED: $d/$t"
-                      trees=$((trees + 1))
-                    fi
-                  done
-                  if [ -e "$d/xorg/modules/drivers/nvidia_drv.so" ] || [ -L "$d/xorg/modules/drivers/nvidia_drv.so" ]; then
-                    echo "DRIVER TREE STILL BAKED: $d/xorg/modules/drivers/nvidia_drv.so"
-                    trees=$((trees + 1))
-                  fi
-                done
-                echo "driver trees still baked after the strip: $trees (must be 0)"
-                test "$trees" -eq 0 || exit 1
             - check: the nvcc CUDA compiler driver is on the canonical /usr path
               file:
                 file: /usr/bin/nvcc

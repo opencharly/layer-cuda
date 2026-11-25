@@ -22,9 +22,10 @@ driver's contract is decided by the substrate, not by the toolkit.
   composes `layer-nvidia` **at the box level** (`opencharly/vm-nvidia`).
 
 A `require:` here is target-blind: it pushed the driver into every pod that composed the toolkit,
-and this layer's own strip then removed it again, leaving `layer-nvidia`'s baked `check:` steps
-asserting `/usr/bin/nvidia-ctk` on an image whose composition deletes it
-(opencharly/layer-nvidia#25, opencharly/spec#395).
+and it then had to be stripped again, leaving `layer-nvidia`'s baked `check:` steps asserting
+`/usr/bin/nvidia-ctk` on an image whose composition deletes it (opencharly/layer-nvidia#25,
+opencharly/spec#395). The toolkit is now installed driver-free at the SOURCE (below), so there is
+no strip step at all.
 
 ## Candy Properties
 
@@ -67,41 +68,27 @@ preprocesses a real CUDA translation unit to prove the whole header root resolve
 With that stitch in place, the same `nvcc`, header, and library paths resolve
 identically on Fedora and on Arch/CachyOS.
 
-## Driver user-space vs the CUDA runtime — the strip and what it must keep
+## Driver user-space vs the CUDA runtime — installed driver-free at the SOURCE
 
-Installing the toolkit also drags in host-coupled driver user-space (`pacman -S cuda` depends on
-`nvidia-utils`; `dnf install cuda-nvcc` pulls `nvidia-driver` user-space on some distros), which shadows the
-driver the container runtime injects. `cuda-drop-driver-userspace` removes it, and it is the ONE copy of
-that removal: `layer-cdi` deliberately keeps none of its own and only asserts the result.
+Installing the toolkit would drag in host-coupled driver user-space: on the pac path `cuda` depends
+on `opencl-nvidia` (three driver files), and `cudnn` depends on `cuda`. This layer therefore
+installs the toolkit with that dependency treated as satisfied:
 
-Three library families share the lib layout in the resulting image, and only the first may be deleted:
+```
+pacman -Syu --noconfirm --needed --assume-installed opencl-nvidia cuda cudnn
+```
 
-| family | names | disposition |
-|---|---|---|
-| **driver** | `libcuda.so{,.1,.<ver>}`, `libcudadebugger.so{,.1,.<ver>}`, `libnvidia-*.so*`, `libnvcuvid*`, `libnvoptix*`, `libGLX_nvidia*`, `libEGL_nvidia*`, `libGLESv1_CM_nvidia*`, `libGLESv2_nvidia*` | **deleted** |
-| **runtime** | `libcudart.so{,.13,.13.5.37}`, `libcudart_static.a`, `libcudadevrt.a` | kept — this layer installs them |
-| **compute** | `libcublas*`, `libcudnn*`, `libnvrtc*`, `libcurand*`, `libcufft*`, `libcusparse*`, `libcusolver*`, `libnvJitLink*` | kept — this layer installs them |
+The driver reaches a pod from the host through CDI (`podcdi.pod-cdi`), its only provider; the image
+bakes none, and there is no strip step any more (opencharly/layer-cuda#39). `layer-cdi` asserts the
+result at build time. Measured in a disposable cachyos container: `nvcc` and
+`libcudart`/`libcublas` present, zero driver residue, no `nvidia-smi`/`nvidia-ctk`.
 
-The predicate is anchored, not a prefix: `libcuda.so*`, never `libcuda*`. The prefix family `libcuda*` also
-contains `libcudart*` and `libcudadevrt*`, so a prefix glob deletes the very runtime the stitch just put in
-place and the `ls /usr/lib64/libcudart.so*` check then exits 2 (opencharly/layer-cuda#23).
-`libcudadebugger.so*` is listed explicitly because it *is* driver user-space — it is in the CDI spec's
-injected set — but does not carry the `libcuda.so` stem.
-
-The step also asserts what it KEEPS: every runtime/compute library present before the strip must still be
-present after it, and the build fails naming the file otherwise. The residue count alone cannot tell the two
-families apart, which is exactly how the runtime came to be deleted while the build stayed green. Both
-directory lists are overridable (`CUDA_STRIP_LIB_DIRS`, `CUDA_STRIP_BIN_DIRS`) so the step can be executed
-against a fixture without a GPU or an image build.
-
-The libraries, the `nvidia`/`vdpau` driver trees and the Xorg driver
-(`xorg/modules/drivers/nvidia_drv.so`) are walked in every lib layout the image has — `/usr/lib`,
-`/usr/lib32` and `/usr/lib64` — not a hard-coded `/usr/lib`. `/usr/lib64` is a symlink to `lib`
-on Arch/CachyOS but a REAL directory on Fedora, and multilib adds `/usr/lib32`; a single-path
-`rm -rf /usr/lib/vdpau` therefore reports success while `/usr/lib64/vdpau`, `/usr/lib32/vdpau` and
-`/usr/lib64/xorg/modules/drivers/nvidia_drv.so` stay baked (opencharly/layer-cuda#28). The tree
-assertion names every surviving tree and the Xorg driver, and fails the build; a symlinked layout is
-skipped there so one inode reachable through two names is not counted twice.
+The runtime/compute libraries must stay: `libcudart*`, `libcudadevrt*`, `libcublas*`, `libcudnn*`,
+`libnvrtc*`, `libcurand*`, `libcufft*`, `libcusparse*`, `libcusolver*`, `libnvJitLink*`. The
+anchored predicate (`libcuda.so*`, never `libcuda*`) remains the rule for anyone auditing an image:
+the prefix family also spans the runtime (opencharly/layer-cuda#23), and `libcudadebugger.so*` is
+driver user-space without the `libcuda.so` stem. The Xorg/NVIDIA-package driver trees are no longer
+a subject of this layer — nothing installs them.
 
 ## Install tasks
 
