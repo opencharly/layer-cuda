@@ -19,7 +19,7 @@ driver's contract is decided by the substrate, not by the toolkit.
   driver user-space shadows the host's (`layer-cdi`'s `cdi-no-baked-driver-binaries` fails the
   build when it does).
 - A **VM** owns its kernel and must bake the driver itself, so a VM / NVIDIA-substrate box
-  composes `layer-nvidia` **at the box level** (`opencharly/vm-nvidia`).
+  composes `layer-nvidia` **at the box level**.
 
 A `require:` here is target-blind: it pushed the driver into every pod that composed the toolkit,
 and it then had to be stripped again, leaving `layer-nvidia`'s baked `check:` steps asserting
@@ -113,8 +113,8 @@ A **VM**: the box names `layer-nvidia` itself, beside the toolkit. The two are s
 box level, never a `require:` inside either layer.
 
 ```yaml
-# charly.yml — the passthrough-VM base (opencharly/vm-nvidia)
-vm-nvidia:
+# charly.yml — a passthrough-VM box
+gpu-vm:
   candy:
     base: cachyos.cachyos
     candy:
@@ -126,7 +126,7 @@ vm-nvidia:
 
 - `podcdi.pod-cdi` — the GPU pod base every CachyOS GPU box composes (the toolkit today, with the
   driver left to CDI); the Fedora CDI boxes were dropped (opencharly/opencharly#1287)
-- `vm-nvidia` — the GPU-passthrough VM base (`opencharly/vm-nvidia`), which composes
+- a GPU-passthrough VM box, which composes
   `layer-nvidia` beside this layer
 - `cuda-arch-builder` — the CUDA-capable NVENC builder (`opencharly/distro-arch`)
 - `versa`, `immich-cdi` — the toolkit on a pod

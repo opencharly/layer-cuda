@@ -32,7 +32,7 @@ cuda:
             # build|deploy|runtime and pod-vs-VM is not even its axis.
             #
             # The dependency therefore lives where the substrate is known: a VM / NVIDIA box
-            # composes `layer-nvidia` ITSELF, at the box level (see opencharly/vm-nvidia). This
+            # composes `layer-nvidia` ITSELF, at the box level. This
             # layer declares only what the toolkit needs to install: ffmpeg's codec libraries.
             - '@github.com/opencharly/layer-ffmpeg:v2026.272.0056'
         env:
